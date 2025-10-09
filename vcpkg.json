@@ -1,0 +1,8 @@
+{
+  "dependencies": [
+    "zstd",
+    "lz4",
+    "blake3",
+    "gtest"
+  ]
+}
