@@ -3,6 +3,7 @@
     "zstd",
     "lz4",
     "blake3",
-    "gtest"
+    "gtest",
+    "stduuid"
   ]
 }

@@ -85,10 +85,18 @@ void DataWriter::update_previous_chunk_offsets_block_pointer(uint64_t previous_b
 
 DataWriter DataWriter::create_new(const std::filesystem::path& filepath, size_t chunk_offsets_block_capacity,
                                   std::span<const uint8_t> user_metadata) {
+    // Precondition check: Ensure the file does not exist before trying to create it.
+    if (std::filesystem::exists(filepath)) {
+        throw std::runtime_error("File already exists: " + filepath.string() + ". Use open_for_append for existing files.");
+    }
     return DataWriter(filepath, chunk_offsets_block_capacity, user_metadata);
 }
 
 DataWriter DataWriter::open_for_append(const std::filesystem::path& filepath) {
+    // Precondition check: Ensure the file exists before trying to open it for appending.
+    if (!std::filesystem::exists(filepath)) {
+        throw std::runtime_error("File does not exist: " + filepath.string() + ". Use create_new for new files.");
+    }
     return DataWriter(filepath, for_append);
 }
 
@@ -102,16 +110,10 @@ DataWriter::DataWriter(const std::filesystem::path& filepath, const size_t chunk
                        const std::span<const uint8_t> user_metadata)
     : DataWriter(std::make_unique<FileBackend>(filepath, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc), // NOLINT(*-pass-by-value)
                  chunk_offsets_block_capacity, user_metadata) {
-    if (std::filesystem::exists(filepath)) {
-        throw std::runtime_error("File already exists: " + filepath.string() + ". Use append constructor for existing files.");
-    }
 }
 
 DataWriter::DataWriter(const std::filesystem::path& filepath, for_append_t)
     : DataWriter(std::make_unique<FileBackend>(filepath, std::ios_base::in | std::ios_base::out | std::ios_base::binary)) {
-    if (!std::filesystem::exists(filepath)) {
-        throw std::runtime_error("File does not exist: " + filepath.string() + ". Use new file constructor for new files.");
-    }
 }
 
 DataWriter::DataWriter(std::unique_ptr<IStorageBackend> backend, size_t chunk_offsets_block_capacity,

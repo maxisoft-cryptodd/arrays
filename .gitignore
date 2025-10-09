@@ -726,3 +726,4 @@ cython_debug/
 #.idea/
 
 .idea/AICommit.xml
+/vcpkg_installed/

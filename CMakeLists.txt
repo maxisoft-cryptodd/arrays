@@ -72,12 +72,14 @@ find_package(zstd CONFIG REQUIRED)
 find_package(lz4 CONFIG REQUIRED)
 find_package(blake3 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
+find_package(stduuid CONFIG REQUIRED)
 
 # Make the library's dependencies public
 target_link_libraries(cryptodd_arrays PUBLIC
         zstd::libzstd
         lz4::lz4
         BLAKE3::blake3
+        stduuid
 )
 
 # Link the executable to the library
@@ -87,7 +89,7 @@ target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays)
 add_executable(cryptodd_arrays_test
         test/lib_simple_tests.cpp
         test/cdd_file_tests.cpp)
-target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays cryptodd_arrays_shared)
+target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays cryptodd_arrays_shared stduuid)
 
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)
