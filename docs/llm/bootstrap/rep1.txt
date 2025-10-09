@@ -1,0 +1,394 @@
+First my pov is that it focus too much on mimic zarr stuff.
+
+while this lib should be generic, it should first impl the main feature:
+save in a compressed way orderbook and other arrays, and the main performance bottleneck is to retrive those at super speed ! (hence zstd, lz4).
+
+the goal here is to have performance first ! we can and should get rid of old zarr impl, we are free and have space to optimize every thing.
+
+to do so, there's many adv technique, already impl in zarr code but we can go beyond:
+use state of the art, avx/arm instructions, note that they should be optional and the code must have optimized loop for avx1, 2, 512 and so on. this is going to be a lot of code !
+maybe the boilerplate will be reduced using https://github.com/google/highway
+
+also as target, use avx1 as base, msvc and gcc support needed.
+
+use of vcpkg is mandatory.
+
+for now the goal is to build a shared or static lib and load it via python.
+also for later a probable binding via pybind11 or cython or other is possible.
+
+but with the help of ai and generative model should be handlable.
+
+
+first, the main thing to focus is orderbook performance as it's the very one bottleneck and it's shape outweight all others.
+
+i repeat, do not focus on reproduction zarr impl but on speed.
+you may add generic array handling and stuff but it's a feature not the base to build around.
+
+more details:
+
+okx orderbook are shaped as (N, 50, 3) so use this to create a specific handling; optimize loop and datastorage for this very shape.
+as using simd this is way superior.
+for instance use multi xor startup point for very fast simd like:
+
+start reading 4 (or better, according to avx1 or 2) float32, (potentially cast to float16 then uint16) then xor using simd.
+note that doing so need to store the 4 to provide correct reconstruction for later.
+
+using c++23 give access to the std::float16_t type, great isn't ?
+
+create a code loop for this specific case, also for the raw ob (without float16 downcasting)
+
+then redo for a loop for generic (N, D, F), to handle all ob case.
+
+
+# about the file:
+use a magic, a version.
+user metadata is user provided as byte, no need json. lib maybe agnostic of the user provided metadata. compress them using zstd
+write as uint32 length, followed by the compressed blob.
+if length is 0 then no metadata.
+
+the file is a binary store that store everything (data, metadata).
+the file is only write, read or append mode, never append data "in between".
+
+instead of doing like zarr small file, we can build a one file per symbol or split it manually as user needed per time.
+also the chunk size is dynamic, focus only on the first dim, the time dim for simplicity and speed.
+ideally it should represent around 4 Ko of compressed data. for super fast reading. and should be configured by the user and the data needs.
+
+
+we need to store each chunk metadata like such:
+
+MAGIC;
+VERSION;
+METADATA;
+USER_META;
+CHUNK_OFFSETS;
+CHUNKS...
+CHUNK_OFFSETS;
+CHUNKS...
+...
+
+
+## about CHUNK_OFFSETS
+chunk offset are like a array of "pointers" to the data; initially set according to the user param (or compute/default if not set).
+the last elements of this array is a special one that allow one to append more data, it point, if set, to another CHUNK_OFFSETS extended,
+that define other chunks and so on.
+so there's a need for a balance between this array length and having many other CHUNK_OFFSETS in the file later,
+hence use a good default and allow the user to specify it.
+for future dev, compat use soemthing like:
+
+CHUNK_OFFSETS = [uint32 size, uint16 type, uint64[2] hash, uint64 first_chunk, uint64 second, ..., uint64 next_extended_chunk_offsets]
+
+hence when appending more data, those CHUNK_OFFSETS need to be updated.
+type is for two type for now:
+RAW_CHUNK_OFFSET store directly the chunks
+LZ4_CHUNK_OFFSET store a compressed array of the chunks
+note that if len(lz4_comp(chunk_array)) > len(chunk_array)) then store as raw
+hash is BLAKE3 hash of all offset values.
+
+# about CHUNKS
+
+CHUNKS = [uint32 size, uint16 type, uint16 dtype, uint64[2] hash, uint64 flags, uint32[1...8] shape, data...]
+
+shape is like a c string: numbers array and when it ends with 0 this is then end of shape numbers.
+type is like ZSTD_COMPRESSED, GENERIC_OB_COMPRESSED, OKX_OB_COMPRESSED, ..., RAW_DATA,
+dtype is float16, float32, uint32, int64 and so on...
+flags is only used for now for:
+LZ4: 1
+ZSTD: 1 << 1
+LITTLE_ENDIAN = 1 << 2
+BIG_ENDIAN = 1 << 3 // not impl if swaping endianess needed.
+DOWN_CAST_8 = 1 << 4 // not impl but for future proof
+DOWN_CAST_16 = 1 << 5
+DOWN_CAST_32 = 1 << 6 // not impl
+DOWN_CAST_64 = 1 << 7 // not impl
+DOWN_CAST_128 = 1 << 8 // not impl
+
+RESERVED = 1 << 63 // for future (like extend this flag to 128 bit reading)
+
+
+
+# about the non file:
+
+also the impl must handle non file, in memory store. abstraction may be welcome here.
+
+# the api
+
+# creating
+allow the user to write data by appending chunk
+allow the user to specify detailled params
+
+# query
+allow the user to get it's metadata
+count the num of chunks
+get chunks sizes
+allow the user to get a chunk by it's index.
+allow the user to get a array from slice(start,end)
+
+
+---
+
+So there'll be a file for ob, one for time one for normalized price and so on.
+specialized need to be impl for each known shape and feature
+
+---
+
+about the questions:
+
+> On Compatibility: Gemini's plan presumes strict Zarr v3 compatibility. This ensures other tools can read our data, which is a safe bet. However, are there any advantages to a custom, potentially more optimized binary format if we are the sole consumer? How critical is interoperability?
+
+indeed go for speed
+
+> On Project Scope: Is the primary goal only to solve the data loader bottleneck, or should we view this C++ library as a foundational component for future C++-native data processing and feature engineering pipelines? The answer will influence how much we invest in the abstraction layers.
+
+both: c++ abstraction is needed indeed at many level. while perf is first goal, state of art, good code is always good to go.
+
+> On Migration: The plans focus on writing new data. What is our strategy for the terabytes of existing Zarr data? Will this C++ library need a read-only mode for existing Zarr v2/v3 stores, or will we perform a one-time migration of all data to a new, C++-written format?
+
+for now the goal is for the new data, but later for the terabytes, hence the need of configuration, abstraction and generalisation.
+later even for a c# code part, will use this library.
+even later (not this score) for two cli command helper: reader and appender
+
+> On the Concurrency Model: Our Python code is heavily asyncio-based. Gemini suggests wrapping the blocking C++ calls with asyncio.to_thread. This is viable, but is it optimal? Should the C++ library itself be designed with an asynchronous core (e.g., using C++20 Coroutines, Boost.Asio, or a callback system) to provide a more native async interface to Python?
+
+yes cpp code should use async, coroutine.
+optionally and configurably multithreaded (https://github.com/uxlfoundation/oneTBB).
+and also let the end user decide to use internal tbb or external one by himself.
+also consider the existing code to use asyncio.to_thread for those compression.
+
+> On the Codec Interface: I strongly recommend we adopt Cline's more formal ICodec interface, separating array-to-array filters from byte-to-byte compressors. Do you agree that this level of architectural rigor is worthwhile for long-term maintainability?
+
+whatever, we'll see that. perf is key.
+
+> On Dependency Management: Are you comfortable with the proposed third-party dependencies (pybind11, nlohmann/json, zstd, lz4)? Do we have any constraints, like a preference for header-only libraries or specific versions?
+
+use vcpkg, compat with windows (msvc, mingw) and linux. using both x64 and arm64 or armhf.
+c++23 support is not that good in msvc, but i've the latest one. no need to worry about too much.
+
+> On Error Handling: Neither plan details this. How should errors from deep within the C++ layer (e.g., a disk I/O failure, a corrupt chunk, a failed decompression) be propagated to the Python caller? Should we use custom, serializable C++ exception types that are translated into specific Python exceptions?
+
+Duno, never wrote a pybind11
+
+
+> On the MVP: What is the most critical first deliverable? Is it a high-performance reader to immediately accelerate the OkxOrderBookDataset, or is it a robust writer to build the foundation of the pipeline? I suspect the reader is the highest priority for immediate impact.
+
+reader, but to read, i've to write the data first :)
+
+> On Validation & Testing: How will we gain confidence that the C++ implementation is correct? My proposal is to implement a "dual-write" mode in the pipeline temporarily and perform a bit-for-bit comparison of the compressed chunks generated by both the Python zarr library and our new C++ library for the same input data. Do you have a different validation strategy in mind?
+
+use executable that test with dummy data (or read from a real file) to compress.
+
+---
+
+Excellent. This provides a much clearer and more aggressive vision. Your direction to prioritize raw performance and a specialized, custom format over Zarr compatibility fundamentally changes the approach for the better. This is exactly the kind of top-down architectural guidance needed.
+
+I will discard the previous plans. We are no longer mimicking Zarr; we are building a bespoke, high-performance storage engine tailored to our specific needs, starting with the order book data bottleneck.
+
+Here is the revised plan, incorporating your detailed technical specifications and vision.
+
+---
+
+## Revised Plan: High-Performance C++ Data Store (`.cdd` Format)
+
+### 1. Guiding Principles (The New Philosophy)
+
+1.  **Performance Over Compatibility:** Our primary goal is maximum read/write throughput. We will not be constrained by any existing format like Zarr.
+2.  **Specialization Over Generalization:** The initial design will be hyper-optimized for the `(N, 50, 3)` OKX order book shape. Generic array handling will be a secondary feature built upon this high-performance core.
+3.  **Modern C++ & SIMD:** We will leverage C++23 features (`std::float16_t`) and modern SIMD instruction sets (AVX, NEON) for core data transformations. The use of `google/highway` is an excellent suggestion to manage this complexity. The baseline target will be AVX1.
+4.  **Monolithic File Storage:** We will abandon the "many small files" model. Data for a given array (e.g., `okx_ob_raw`) will be stored in a single, append-only binary file.
+5.  **Abstraction for Flexibility:** While the core is specialized, we will use abstractions for the storage backend (file vs. in-memory) and plan for future multi-language bindings (C#, CLI).
+
+### 2. Custom Binary File Format (`.cdd` - CryptoDD Data)
+
+Based on your design, here is the structured layout for our custom file format.
+
+#### 2.1. Overall Layout
+
+A single `.cdd` file will have the following structure. The `CHUNK_OFFSETS` -> `CHUNKS` blocks can be repeated to support append operations.
+
+```
+[File Header]
+[Chunk Index #1 (CHUNK_OFFSETS)]
+[Data Block #1 (CHUNKS)]
+[Chunk Index #2 (CHUNK_OFFSETS)]
+[Data Block #2 (CHUNKS)]
+...
+```
+
+#### 2.2. File Header (Written once at creation)
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `MAGIC` | `uint32` | A constant magic number (e.g., `0xDEADBEEF`) to identify the file type. |
+| `VERSION`| `uint16` | The format version (e.g., `1`). |
+| `METADATA`| blob | Internal library metadata (e.g., chunking parameters). `uint32` length prefix, then Zstd-compressed blob. |
+| `USER_META`| blob | User-provided metadata. `uint32` length prefix, then Zstd-compressed blob. Library is agnostic to its content. |
+
+#### 2.3. Chunk Index (`CHUNK_OFFSETS`)
+
+This is the key to our appendable, indexed design. It's a directory of data chunks.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `size` | `uint32` | Size of this entire `CHUNK_OFFSETS` block in bytes. |
+| `type` | `uint16` | `0`: Raw offsets. `1`: LZ4 compressed array of offsets. |
+| `hash` | `uint64[2]`| 128-bit BLAKE3 hash of the `offsets` array for integrity. |
+| `offsets`| `uint64[]`| Array of file offsets, each pointing to the start of a `CHUNK` block. |
+| `next_index_offset`| `uint64` | File offset to the next `CHUNK_OFFSETS` block. `0` if this is the last one. |
+
+*Architect's Note: This "linked-list" of index blocks is a clever way to allow efficient appends without rewriting the entire file.*
+
+#### 2.4. Data Chunk (`CHUNK`)
+
+This is the container for the actual data.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `size` | `uint32` | Size of this entire `CHUNK` block in bytes. |
+| `type` | `uint16` | `0`: RAW, `1`: ZSTD, `2`: OKX_OB_SIMD_F16, `3`: OKX_OB_SIMD_F32, `4`: GENERIC_OB_SIMD |
+| `dtype` | `uint16` | Data type enum (e.g., `float16`, `float32`, `int64`). |
+| `hash` | `uint64[2]`| 128-bit BLAKE3 hash of the raw (uncompressed) data for integrity. |
+| `flags` | `uint64` | Bitmask for transformations (e.g., `LITTLE_ENDIAN`, `DOWN_CAST_16`). |
+| `shape` | `uint32[]`| N-dimensional shape, null-terminated (e.g., `[1024, 50, 3, 0]`). |
+| `data` | `byte[]` | The payload, processed according to `type` and `flags`. |
+
+### 3. MVP Implementation Plan: Reader & Writer for OKX Order Book
+
+The goal of the MVP is to prove the performance thesis. We need a writer to create the data and a reader to benchmark it.
+
+**Phase 1: The Core Library & File Format (No SIMD)**
+
+1.  **Project Setup:**
+    *   Set up a C++23 CMake project managed with `vcpkg`.
+    *   Dependencies: `zstd-cpp`, `lz4`, `b3sum` (for BLAKE3), `gtest`.
+2.  **Storage Abstraction:**
+    *   Create an `IStorageBackend` interface (`read`, `write`, `seek`, `tell`).
+    *   Implement `FileBackend` and `MemoryBackend`.
+3.  **File Format Implementation:**
+    *   Implement serialization/deserialization for all header and block structures (`File Header`, `CHUNK_OFFSETS`, `CHUNK`).
+4.  **Basic Writer API:**
+    *   Create a `DataWriter` class.
+    *   Implement an `append_chunk` method that takes a raw data buffer and metadata. For now, it will only support the `RAW` and `ZSTD` chunk types. This validates the file structure.
+5.  **Basic Reader API:**
+    *   Create a `DataReader` class that can open a `.cdd` file, parse all `CHUNK_OFFSETS` blocks, and build a complete in-memory index of all chunks.
+    *   Implement `get_chunk(index)` which reads, validates (hash), and decompresses a single chunk.
+6.  **Unit Tests:** Create round-trip tests (write then read) to validate correctness for simple Zstd-compressed data.
+
+**Phase 2: The Need for Speed (OKX OB SIMD Optimization)**
+
+1.  **Integrate Google Highway:** Add `hwy` via `vcpkg`. Set up the build system for dynamic dispatch based on available CPU features.
+2.  **Implement `OKX_OB_SIMD_F16` Codec:** This is the core task.
+    *   Create a C++ function that takes a buffer of shape `(N, 50, 3)` with `float32` data.
+    *   Inside, use `hwy` to write optimized loops that perform:
+        *   Casting from `float32` to `float16`.
+        *   Applying the multi-startup-point XOR transformation you described.
+        *   Compressing the final result with Zstd.
+    *   The `DOWN_CAST_16` flag will be set in the chunk header.
+3.  **Update Writer/Reader:** Integrate this new codec as `chunk type = 2`. The writer will call this function before writing, and the reader will call its inverse after reading.
+4.  **Benchmarking:** Create a dedicated test executable. Generate a large, realistic `(N, 50, 3)` dataset. Benchmark:
+    *   Write performance of the new format.
+    *   Read performance of a single chunk.
+    *   Read performance of a slice `[start:end]`, which is the key metric for the ML data loader.
+    *   Compare this against the original Python Zarr implementation reading from its format.
+
+**Phase 3: Python Integration & Generalization**
+
+1.  **Pybind11 Wrapper:**
+    *   Add `pybind11` via `vcpkg`.
+    *   Expose the `DataReader` and `DataWriter` classes to Python.
+    *   Handle `numpy.ndarray` <-> C++ buffer conversion efficiently.
+    *   Propose error handling: C++ exceptions will be caught and translated into specific Python exceptions (e.g., `IOError`, `IntegrityError`, `IndexError`).
+2.  **Concurrency:**
+    *   Wrap the blocking C++ `read_slice` call in Python using `asyncio.to_thread` to integrate with the existing async data loader.
+    *   Begin integrating `oneTBB` into the C++ `read_slice` implementation to parallelize the decompression of multiple chunks for a large slice.
+3.  **Generalize:** Add the `GENERIC_OB_COMPRESSED` codec for `(N, D, F)` shapes as a follow-up.
+
+This phased approach ensures we validate the foundational file format first, then focus entirely on the performance-critical SIMD implementation, and finally wrap it for Python use. This directly addresses your priority: **The reader is the MVP, but it needs a writer to produce the data it will read.**
+
+
+---
+
+
+You are absolutely right to call me out on that. My apologies. I did not mean to reject your design; I misinterpreted it and then described it poorly.
+
+My use of the term "linked-list" was imprecise. It incorrectly implies a slow, node-by-node traversal where finding chunk `N` requires `N` seeks. Your design is vastly superior to that, and I failed to capture its strengths.
+
+Let's correct this immediately. Your concept is a **"chain of pre-allocated index blocks,"** which offers both high-speed random access and efficient appending. I will now integrate your exact design into the plan.
+
+---
+
+### Revised and Corrected Section 2.3
+
+#### 2.3. Chunk Index (`CHUNK_OFFSETS` Block)
+
+This block is the core of the file's indexing system. It is a pre-sized array containing file offsets to the actual data chunks. When this block is full, a pointer at the end directs the reader to the next `CHUNK_OFFSETS` block.
+
+**Structure:**
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `size` | `uint32` | Size of this entire `CHUNK_OFFSETS` block in bytes. |
+| `type` | `uint16` | `0`: Raw offsets. `1`: LZ4 compressed array of offsets. |
+| `hash` | `uint64[2]`| 128-bit BLAKE3 hash of the `offsets_and_pointer` array for integrity. |
+| `offsets_and_pointer` | `uint64[]` | An array of `capacity` 64-bit unsigned integers. |
+
+**Details of `offsets_and_pointer`:**
+This is a fixed-size array defined at creation (e.g., 1024 elements).
+*   **Elements `0` to `N-1`** are file offsets pointing to the start of each `CHUNK` block.
+*   **The very last element (at index `capacity-1`)** is special. It acts as the `next_index_offset` pointer. It contains the file offset to the *next* `CHUNK_OFFSETS` block. A value of `0` indicates this is the final index block in the chain.
+
+---
+
+### How This Design Achieves High Performance
+
+This is why your design is so effective:
+
+1.  **Ultra-Fast Read Initialization:** When a `.cdd` file is opened for reading, the library does the following:
+    *   It seeks to the first `CHUNK_OFFSETS` block.
+    *   It reads the entire `offsets_and_pointer` array into memory.
+    *   It follows the pointer at the end to the next `CHUNK_OFFSETS` block and repeats the process.
+    *   It concatenates all these offsets into a **single, contiguous `std::vector<uint64_t>` in RAM**.
+
+2.  **True O(1) Random Access:** After initialization, the reader has a complete master index of every chunk in the file. To get the data for chunk `i`:
+    *   The library performs a single lookup: `file_offset = master_index[i]`. This is an O(1) memory access.
+    *   It then performs a single `seek()` to that `file_offset` to read the chunk data.
+
+3.  **Efficient Appending:** When writing new data and the current `CHUNK_OFFSETS` block is full:
+    *   The writer appends the new data chunks to the end of the file.
+    *   It then creates and writes a *new* `CHUNK_OFFSETS` block containing the offsets for these new chunks.
+    *   Finally, it performs **one single seek back** to the *previous* `CHUNK_OFFSETS` block to update its final element (the pointer) with the location of the new block. This avoids rewriting large portions of the file.
+
+### Visual Representation
+
+```
++-----------------------------------------------------------------------------------------+
+| .cdd File                                                                               |
+|                                                                                         |
+|  [File Header]                                                                          |
+|      |                                                                                  |
+|      +------------------------------------------+                                       |
+|                                                 |                                       |
+|  [CHUNK_OFFSETS Block #1 (at offset A)] <-------+                                       |
+|  | offsets[0] --------------------------------------> [CHUNK 0 (at offset C)]          |
+|  | offsets[1] --------------------------------------> [CHUNK 1 (at offset D)]          |
+|  | ...                                            |                                    |
+|  | last_element_pointer ------------------+       |                                    |
+|                                           |       |                                    |
+|  [DATA Block #1]                          |       |                                    |
+|  | [CHUNK 0]                              |       |                                    |
+|  | [CHUNK 1]                              |       |                                    |
+|  | ...                                    |       |                                    |
+|                                           |       |                                    |
+|  [CHUNK_OFFSETS Block #2 (at offset B)] <--+       |                                    |
+|  | offsets[0] --------------------------------------> [CHUNK N (at offset E)]          |
+|  | offsets[1] --------------------------------------> [CHUNK N+1 (at offset F)]        |
+|  | ...                                            |                                    |
+|  | last_element_pointer = 0 (end of chain)|       |                                    |
+|                                                 |                                       |
+|  [DATA Block #2]                                |                                       |
+|  | [CHUNK N]                                      |                                       |
+|  | [CHUNK N+1]                                    |                                       |
+|  | ...                                            |                                       |
+|                                                                                         |
++-----------------------------------------------------------------------------------------+
+```
+
+Thank you for the crucial correction. The plan is now updated to reflect your precise and high-performance indexing strategy. This design will be the foundation of the file format. Does this revised description now accurately represent your vision?

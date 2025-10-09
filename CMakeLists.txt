@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 4.0)
 
 # Set up vcpkg integration. This logic must run before the project() command.
 # This makes the project easier to configure without relying on presets or command-line args.
@@ -37,13 +37,33 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 include(GenerateExportHeader)
 
-add_library(cryptodd_arrays SHARED library.cpp)
+add_library(cryptodd_arrays STATIC
+    src/data_io/data_writer.cpp
+    src/file_format/blake3_stream_hasher.cpp
+    src/data_io/data_reader.cpp
+)
+
+add_library(cryptodd_arrays_shared SHARED
+        library.cpp
+)
+
+target_link_libraries(cryptodd_arrays_shared PRIVATE cryptodd_arrays)
 
 # This creates cryptodd_arrays_export.h and defines CRYPTODD_ARRAYS_API
-generate_export_header(cryptodd_arrays)
+GENERATE_EXPORT_HEADER(cryptodd_arrays_shared)
 
 # Add the binary directory to the include path. This is where the export header is generated.
-target_include_directories(cryptodd_arrays PUBLIC "${CMAKE_BINARY_DIR}")
+target_include_directories(cryptodd_arrays PUBLIC
+    "${CMAKE_BINARY_DIR}"
+    "${CMAKE_SOURCE_DIR}/src/storage"
+    "${CMAKE_SOURCE_DIR}/src/file_format"
+    "${CMAKE_SOURCE_DIR}/src/data_io"
+)
+
+target_include_directories(cryptodd_arrays_shared PUBLIC
+        "${CMAKE_BINARY_DIR}"
+        cryptodd_arrays
+)
 
 add_executable(cryptodd_arrays_exe main.cpp)
 
@@ -64,8 +84,10 @@ target_link_libraries(cryptodd_arrays PUBLIC
 target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays)
 
 # Add a test executable
-add_executable(cryptodd_arrays_test test/main.cpp)
-target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays)
+add_executable(cryptodd_arrays_test
+        test/lib_simple_tests.cpp
+        test/cdd_file_tests.cpp)
+target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays cryptodd_arrays_shared)
 
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)

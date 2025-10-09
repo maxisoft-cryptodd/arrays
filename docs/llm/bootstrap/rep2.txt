@@ -1,1 +1,8 @@
 https://aistudio.google.com/app/prompts/1DQJ_1sCaARdGLANLNzHFPlSnmF9iLcdr
+
+
+also https://facebook.github.io/zstd/zstd_manual.html
+
+
+
+ob Compression and highway - https://aistudio.google.com/app/prompts/1GDScwta00UZ7RAV1NzTQ1ZSWymz3o96g
