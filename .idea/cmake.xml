@@ -9,6 +9,13 @@
           </envs>
         </ADDITIONAL_GENERATION_ENVIRONMENT>
       </configuration>
+      <configuration PROFILE_NAME="Release" ENABLED="true" CONFIG_NAME="RelWithDebInfo" GENERATION_OPTIONS="-DCMAKE_MSVC_RUNTIME_LIBRARY=&quot;MultiThreaded$&lt;$&lt;CONFIG:Debug&gt;:Debug&gt;&quot; -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_CXX_FLAGS_RELEASE=&quot;/Gv /Ox&quot;" NO_GENERATOR="true">
+        <ADDITIONAL_GENERATION_ENVIRONMENT>
+          <envs>
+            <env name="VCPKG_ROOT" value="D:\maxisoft\ClionProjects\cryptodd_arrays\vcpkg" />
+          </envs>
+        </ADDITIONAL_GENERATION_ENVIRONMENT>
+      </configuration>
     </configurations>
   </component>
 </project>
