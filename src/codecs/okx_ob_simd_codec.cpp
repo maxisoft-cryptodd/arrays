@@ -2,10 +2,15 @@
 #include <string>
 #include <numeric>
 #include <array>
-#include <algorithm> // For std::copy_n
+#include <algorithm>
+#include <vector>
+#include <span>
 
-#include "zstd.h"
+// Bring in the class definition.
 #include "okx_ob_simd_codec.h"
+
+// These headers are needed for the SIMD implementations below
+#include "hwy/aligned_allocator.h"
 
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "okx_ob_simd_codec.cpp" // This file includes itself
@@ -13,16 +18,17 @@
 
 // Must come after foreach_target.h to avoid redefinition errors.
 #include "hwy/highway.h"
-#include "hwy/aligned_allocator.h"
 
 // =================================================================================
 // FORWARD DECLARATIONS for Highway's dynamic dispatch
 // =================================================================================
 namespace cryptodd::HWY_NAMESPACE {
-    void TemporalXor(const float* HWY_RESTRICT current, const float* HWY_RESTRICT prev, float* HWY_RESTRICT out, size_t num_floats);
+    // We pass SnapshotFloats as an argument now instead of using a global constexpr
+    void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out,
+                                 size_t num_snapshots, size_t snapshot_floats,
+                                 std::span<float> last_snapshot_state);
+
     void DemoteFloat32ToFloat16(const float* HWY_RESTRICT in, size_t num_floats, hwy::float16_t* HWY_RESTRICT out);
-    void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out, size_t num_f16);
-    void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out, size_t num_snapshots, OkxSnapshot& last_snapshot_state);
 }
 
 // =================================================================================
@@ -35,7 +41,6 @@ namespace cryptodd
 namespace HWY_NAMESPACE{
 
 // Highway namespace aliases
-// ReSharper disable CppUnusedIncludeDirective
 namespace hn = hwy::HWY_NAMESPACE;
 
 
@@ -48,21 +53,7 @@ inline constexpr hn::ScalableTag<uint8_t> du8;
 using VF32 = hn::Vec<hn::ScalableTag<float>>;
 using VU32 = hn::Vec<hn::ScalableTag<uint32_t>>;
 using VF16 = hn::Vec<hn::ScalableTag<hwy::float16_t>>;
-// ReSharper restore CppUnusedIncludeDirective
 using VU16 = hn::Vec<hn::ScalableTag<uint16_t>>;
-
-// --- ENCODING PIPELINE ---
-void TemporalXor(const float* HWY_RESTRICT current, const float* HWY_RESTRICT prev, float* HWY_RESTRICT out, size_t num_floats) {
-    for (size_t i = 0; i < num_floats; i += hn::Lanes(d32)) {
-        const VF32 v_curr = hn::LoadU(d32, current + i);
-        const VF32 v_prev = hn::LoadU(d32, prev + i);
-        const VU32 v_curr_u32 = hn::BitCast(du32, v_curr);
-        const VU32 v_prev_u32 = hn::BitCast(du32, v_prev);
-        const VU32 v_xor_u32 = hn::Xor(v_curr_u32, v_prev_u32);
-        const VF32 v_xor_f32 = hn::BitCast(d32, v_xor_u32);
-        hn::StoreU(v_xor_f32, d32, out + i);
-    }
-}
 
 // New combined function: Demote float32 to float16, then XOR their bit patterns.
 void DemoteAndXor(const float* HWY_RESTRICT current, const float* HWY_RESTRICT prev,
@@ -191,7 +182,7 @@ void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT
 
     // Remainder loop for SIMD path (if num_f16 is not a multiple of `step`)
     for (; i < num_f16; ++i) {
-        const uint16_t val = hwy::BitCastScalar<uint16_t>(in[i]);
+        const auto val = hwy::BitCastScalar<uint16_t>(in[i]);
         out_b0[i] = static_cast<uint8_t>(val & 0xFF);
         out_b1[i] = static_cast<uint8_t>(val >> 8);
     }
@@ -202,15 +193,16 @@ void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT
 
 // --- DECODING PIPELINE ---
 
-void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out, size_t num_snapshots, OkxSnapshot& last_snapshot_state) {
-    const size_t num_floats_per_snapshot = OKX_OB_SNAPSHOT_FLOATS;
+void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out,
+                             size_t num_snapshots, size_t snapshot_floats,
+                             std::span<float> last_snapshot_state) {
+    const size_t num_floats_per_snapshot = snapshot_floats;
     const size_t total_floats = num_snapshots * num_floats_per_snapshot;
 
     // We need the previous state in float16 format for the reconstruction loop.
     // So we demote it once here.
     auto prev_snapshot_f16 = hwy::AllocateAligned<hwy::float16_t>(num_floats_per_snapshot);
-    DemoteFloat32ToFloat16(last_snapshot_state.data(), num_floats_per_snapshot, prev_snapshot_f16.get());
-    hwy::float16_t* HWY_RESTRICT prev_snapshot_ptr = prev_snapshot_f16.get();
+    DemoteFloat32ToFloat16(last_snapshot_state.data(), num_floats_per_snapshot, prev_snapshot_f16.get());    hwy::float16_t* HWY_RESTRICT prev_snapshot_ptr = prev_snapshot_f16.get();
 
     for (size_t s = 0; s < num_snapshots; ++s) {
         float* HWY_RESTRICT current_out_ptr = out + s * num_floats_per_snapshot;
@@ -278,7 +270,7 @@ void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY
 
     // Now, update the output state by promoting our final f16 state back to f32
     for(size_t i = 0; i < num_floats_per_snapshot; ++i) {
-        last_snapshot_state.data()[i] = hwy::ConvertScalarTo<float>(prev_snapshot_ptr[i]);
+        last_snapshot_state[i] = hwy::ConvertScalarTo<float>(prev_snapshot_ptr[i]);
     }
 }
 
@@ -291,72 +283,22 @@ HWY_AFTER_NAMESPACE();
 // PUBLIC API IMPLEMENTATION (included only once)
 // =================================================================================
 #if HWY_ONCE
-
-// =================================================================================
-// HIGHWAY SETUP for self-inclusion
-// =================================================================================
-
 namespace cryptodd {
 
-HWY_EXPORT(TemporalXor);
-HWY_EXPORT(DemoteAndXor); // Export the new combined function
-HWY_EXPORT(DemoteFloat32ToFloat16);
-HWY_EXPORT(ShuffleFloat16);
-HWY_EXPORT(UnshuffleAndReconstruct);
-
-std::vector<uint8_t> OkxObSimdCodec::encode(std::span<const float> snapshots, const OkxSnapshot& prev_snapshot) {
-    const size_t num_floats = snapshots.size();
-    if (num_floats == 0 || num_floats % OKX_OB_SNAPSHOT_FLOATS != 0) {
-        throw std::runtime_error("Snapshot data size is not a multiple of OKX_OB_SNAPSHOT_FLOATS.");
-    }
-    const size_t num_snapshots = num_floats / OKX_OB_SNAPSHOT_FLOATS;
-
-    auto f16_deltas_buffer = hwy::AllocateAligned<hwy::float16_t>(num_floats); // This now holds the final f16 deltas
-    auto shuffled_buffer = hwy::AllocateAligned<uint8_t>(num_floats * sizeof(hwy::float16_t));
-
-    HWY_DYNAMIC_DISPATCH(DemoteAndXor)(snapshots.data(), prev_snapshot.data(), f16_deltas_buffer.get(), OKX_OB_SNAPSHOT_FLOATS);
-    for (size_t s = 1; s < num_snapshots; ++s) {
-        const float* current_snap = snapshots.data() + s * OKX_OB_SNAPSHOT_FLOATS;
-        const float* prev_snap = snapshots.data() + (s - 1) * OKX_OB_SNAPSHOT_FLOATS;
-        hwy::float16_t* out_snap = f16_deltas_buffer.get() + s * OKX_OB_SNAPSHOT_FLOATS;
-        HWY_DYNAMIC_DISPATCH(DemoteAndXor)(current_snap, prev_snap, out_snap, OKX_OB_SNAPSHOT_FLOATS);
-    }
-
-    // Shuffle the float16 deltas
-    HWY_DYNAMIC_DISPATCH(ShuffleFloat16)(f16_deltas_buffer.get(), shuffled_buffer.get(), num_floats);
-
-    const size_t f16_bytes = num_floats * sizeof(hwy::float16_t); // Total bytes for the shuffled f16 data
-    const size_t compressed_bound = ZSTD_compressBound(f16_bytes); // Max size after ZSTD compression
-    std::vector<uint8_t> compressed_data(compressed_bound); // Allocate buffer for compressed data
-    const size_t compressed_size = ZSTD_compress(compressed_data.data(), compressed_data.size(), shuffled_buffer.get(), f16_bytes, 1);
-
-    if (ZSTD_isError(compressed_size)) {
-        throw std::runtime_error(std::string("ZSTD compression failed: ") + ZSTD_getErrorName(compressed_size));
-    }
-    compressed_data.resize(compressed_size);
-    return compressed_data;
+// Define dispatchers that the header-based template functions can call.
+HWY_EXPORT(DemoteAndXor);
+void DemoteAndXor_dispatcher(const float* current, const float* prev, hwy::float16_t* out, size_t num_floats) {
+    HWY_DYNAMIC_DISPATCH(DemoteAndXor)(current, prev, out, num_floats);
 }
 
-std::vector<float> OkxObSimdCodec::decode(std::span<const uint8_t> encoded_data, size_t num_snapshots, OkxSnapshot& prev_snapshot) {
-    if (num_snapshots == 0) return {};
-    const size_t num_floats = num_snapshots * OKX_OB_SNAPSHOT_FLOATS;
-    const size_t f16_bytes = num_floats * sizeof(hwy::float16_t);
+HWY_EXPORT(ShuffleFloat16);
+void ShuffleFloat16_dispatcher(const hwy::float16_t* in, uint8_t* out, size_t num_f16) {
+    HWY_DYNAMIC_DISPATCH(ShuffleFloat16)(in, out, num_f16);
+}
 
-    auto shuffled_f16_buffer = hwy::AllocateAligned<uint8_t>(f16_bytes); // Buffer to hold unshuffled f16 bytes
-    std::vector<float> final_output(num_floats);
-
-    const size_t decompressed_size = ZSTD_decompress(shuffled_f16_buffer.get(), f16_bytes, encoded_data.data(), encoded_data.size());
-
-    if (ZSTD_isError(decompressed_size)) {
-        throw std::runtime_error(std::string("ZSTD decompression failed: ") + ZSTD_getErrorName(decompressed_size));
-    }
-    if (decompressed_size != f16_bytes) {
-        throw std::runtime_error("Decompressed data size does not match expected float16 size.");
-    }
-
-    HWY_DYNAMIC_DISPATCH(UnshuffleAndReconstruct)(shuffled_f16_buffer.get(), final_output.data(), num_snapshots, prev_snapshot);
-
-    return final_output;
+HWY_EXPORT(UnshuffleAndReconstruct);
+void UnshuffleAndReconstruct_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
+    HWY_DYNAMIC_DISPATCH(UnshuffleAndReconstruct)(shuffled_in, out, num_snapshots, snapshot_floats, last_snapshot_state);
 }
 
 } // namespace cryptodd

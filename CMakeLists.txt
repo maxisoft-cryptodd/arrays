@@ -41,6 +41,7 @@ add_library(cryptodd_arrays STATIC
     src/data_io/data_writer.cpp
     src/file_format/blake3_stream_hasher.cpp
     src/data_io/data_reader.cpp
+    src/codecs/zstd_compressor.cpp
     src/codecs/okx_ob_simd_codec.cpp
 )
 
