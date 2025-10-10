@@ -41,7 +41,11 @@ add_library(cryptodd_arrays STATIC
     src/data_io/data_writer.cpp
     src/file_format/blake3_stream_hasher.cpp
     src/data_io/data_reader.cpp
+    src/codecs/okx_ob_simd_codec.cpp
 )
+
+# Enable dynamic dispatch for the library target
+target_compile_definitions(cryptodd_arrays PRIVATE HWY_EXPORT_AND_DYNAMIC_DISPATCH)
 
 add_library(cryptodd_arrays_shared SHARED
         library.cpp
@@ -58,6 +62,7 @@ target_include_directories(cryptodd_arrays PUBLIC
     "${CMAKE_SOURCE_DIR}/src/storage"
     "${CMAKE_SOURCE_DIR}/src/file_format"
     "${CMAKE_SOURCE_DIR}/src/data_io"
+    "${CMAKE_SOURCE_DIR}/src/codecs"
 )
 
 target_include_directories(cryptodd_arrays_shared PUBLIC
@@ -73,6 +78,7 @@ find_package(lz4 CONFIG REQUIRED)
 find_package(blake3 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(stduuid CONFIG REQUIRED)
+find_package(hwy CONFIG REQUIRED)
 
 # Make the library's dependencies public
 target_link_libraries(cryptodd_arrays PUBLIC
@@ -80,6 +86,7 @@ target_link_libraries(cryptodd_arrays PUBLIC
         lz4::lz4
         BLAKE3::blake3
         stduuid
+        hwy::hwy
 )
 
 # Link the executable to the library
@@ -88,7 +95,8 @@ target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays)
 # Add a test executable
 add_executable(cryptodd_arrays_test
         test/lib_simple_tests.cpp
-        test/cdd_file_tests.cpp)
+        test/cdd_file_tests.cpp
+        test/codecs/okx_ob_simd_codec_test.cpp)
 target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays cryptodd_arrays_shared stduuid)
 
 include(GoogleTest)

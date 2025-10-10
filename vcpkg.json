@@ -4,6 +4,10 @@
     "lz4",
     "blake3",
     "gtest",
-    "stduuid"
+    "stduuid",
+    {
+      "name": "highway",
+      "features": [ "contrib" ]
+    }
   ]
 }
