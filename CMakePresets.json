@@ -3,10 +3,28 @@
   "configurePresets": [
     {
       "name": "vcpkg",
-      "generator": "Visual Studio 17 2022",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "vcpkg-dynamic",
+      "displayName": "Windows MSVC (Dynamic libs)",
+      "description": "Default configuration using vcpkg with dynamic libraries.",
+      "inherits": "vcpkg",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/dynamic"
+    },
+    {
+      "name": "vcpkg-static",
+      "displayName": "Windows MSVC (Static libs)",
+      "description": "Configures the project to link all vcpkg dependencies statically.",
+      "inherits": "vcpkg-dynamic",
+      "binaryDir": "${sourceDir}/build/static",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>"
       }
     }
   ]
