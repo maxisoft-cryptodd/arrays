@@ -18,7 +18,7 @@ std::vector<float> generate_random_snapshots(size_t num_snapshots) {
 
 TEST(OkxObSimdCodecTest, FullPipelineRoundTrip) {
     // 1. Generate test data and initial state
-    const size_t num_snapshots = 16; // Use a multiple of vector lanes for cleaner testing
+    constexpr size_t num_snapshots = 16 * 32; // Use a multiple of vector lanes for cleaner testing
     const std::vector<float> original_data = generate_random_snapshots(num_snapshots);
 
     // The state of the order book *before* this batch starts.
