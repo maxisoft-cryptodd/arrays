@@ -76,9 +76,11 @@ add_executable(cryptodd_arrays_exe main.cpp)
 find_package(zstd CONFIG REQUIRED)
 find_package(lz4 CONFIG REQUIRED)
 find_package(blake3 CONFIG REQUIRED)
-find_package(GTest CONFIG REQUIRED)
 find_package(stduuid CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
+
+find_package(GTest CONFIG REQUIRED)
+find_package(benchmark CONFIG REQUIRED)
 
 # Make the library's dependencies public
 target_link_libraries(cryptodd_arrays PUBLIC
@@ -101,3 +103,12 @@ target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_ar
 
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)
+
+# Add a benchmark executable
+add_executable(cryptodd_arrays_benchmark
+        benchmark/codecs/okx_ob_simd_codec_benchmark.cpp
+)
+target_link_libraries(cryptodd_arrays_benchmark PRIVATE
+        benchmark::benchmark
+        cryptodd_arrays
+)
