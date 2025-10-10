@@ -51,12 +51,12 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_NoDictionary)
 
     // 2. Encode the data
     std::vector<uint8_t> encoded_data;
-    ASSERT_NO_THROW(encoded_data = codec.encode(original_data, initial_prev_snapshot));
+    ASSERT_NO_THROW(encoded_data = codec.encode16(original_data, initial_prev_snapshot));
     ASSERT_FALSE(encoded_data.empty());
 
     // 3. Decode the data
     std::vector<float> decoded_data;
-    ASSERT_NO_THROW(decoded_data = codec.decode(encoded_data, num_snapshots, decoder_prev_snapshot));
+    ASSERT_NO_THROW(decoded_data = codec.decode16(encoded_data, num_snapshots, decoder_prev_snapshot));
 
     // 4. Verify the decoded data
     ASSERT_EQ(decoded_data.size(), original_data.size());
@@ -99,12 +99,12 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_WithDictionary)
 
     // 2. Encode the data
     std::vector<uint8_t> encoded_data;
-    ASSERT_NO_THROW(encoded_data = codec.encode(original_data, initial_prev_snapshot));
+    ASSERT_NO_THROW(encoded_data = codec.encode16(original_data, initial_prev_snapshot));
     ASSERT_FALSE(encoded_data.empty());
 
     // 3. Decode the data
     std::vector<float> decoded_data;
-    ASSERT_NO_THROW(decoded_data = codec.decode(encoded_data, num_snapshots, decoder_prev_snapshot));
+    ASSERT_NO_THROW(decoded_data = codec.decode16(encoded_data, num_snapshots, decoder_prev_snapshot));
 
     // 4. Verify the decoded data
     ASSERT_EQ(decoded_data.size(), original_data.size());
@@ -121,5 +121,37 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_WithDictionary)
     const float* last_original_snapshot_ptr = original_data.data() + (num_snapshots - 1) * OkxCodec::SnapshotFloats;
     for (size_t i = 0; i < OkxCodec::SnapshotFloats; ++i) {
         ASSERT_NEAR(last_original_snapshot_ptr[i], decoder_prev_snapshot[i], 0.5f);
+    }
+}
+
+TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_Float32)
+{
+    // 1. Create a codec instance
+    OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>());
+
+    // The decoder needs the same starting state to begin reconstruction.
+    OkxCodec::OkxSnapshot decoder_prev_snapshot = initial_prev_snapshot;
+
+    // 2. Encode the data using the float32 pipeline
+    std::vector<uint8_t> encoded_data;
+    ASSERT_NO_THROW(encoded_data = codec.encode32(original_data, initial_prev_snapshot));
+    ASSERT_FALSE(encoded_data.empty());
+
+    // 3. Decode the data
+    std::vector<float> decoded_data;
+    ASSERT_NO_THROW(decoded_data = codec.decode32(encoded_data, num_snapshots, decoder_prev_snapshot));
+
+    // 4. Verify the decoded data
+    ASSERT_EQ(decoded_data.size(), original_data.size());
+
+    // Since float32 is a lossless pipeline, we can check for exact equality.
+    for (size_t i = 0; i < original_data.size(); ++i) {
+        ASSERT_EQ(original_data[i], decoded_data[i]);
+    }
+
+    // 5. Verify the final state of the decoder's snapshot
+    const float* last_original_snapshot_ptr = original_data.data() + (num_snapshots - 1) * OkxCodec::SnapshotFloats;
+    for (size_t i = 0; i < OkxCodec::SnapshotFloats; ++i) {
+        ASSERT_EQ(last_original_snapshot_ptr[i], decoder_prev_snapshot[i]);
     }
 }
