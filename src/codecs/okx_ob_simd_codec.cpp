@@ -62,19 +62,34 @@ void TemporalXor(const float* HWY_RESTRICT current, const float* HWY_RESTRICT pr
 }
 
 void DemoteFloat32ToFloat16(const float* HWY_RESTRICT in, size_t num_floats, hwy::float16_t* HWY_RESTRICT out) {
+    size_t i = 0;
+
+#if HWY_TARGET != HWY_SCALAR
+    // SIMD PATH START: Process full vectors. This block is excluded for the scalar target.
     const hn::Half<decltype(d16)> d16_half;
     const size_t f32_lanes = hn::Lanes(d32);
     const size_t f16_lanes = hn::Lanes(d16);
 
-    for (size_t i = 0; i < num_floats; i += f16_lanes) {
+    for (; i + f16_lanes <= num_floats; i += f16_lanes) {
+        // Load two vectors of f32, which together match the number of f16 lanes.
         const VF32 v_f32_lo = hn::LoadU(d32, in + i);
         const VF32 v_f32_hi = hn::LoadU(d32, in + i + f32_lanes);
 
+        // Demote each f32 vector to a half-width f16 vector.
         auto v_f16_lo_half = hn::DemoteTo(d16_half, v_f32_lo);
         auto v_f16_hi_half = hn::DemoteTo(d16_half, v_f32_hi);
 
+        // Combine the two half-width vectors into a full f16 vector.
         VF16 v_f16_full = hn::Combine(d16, v_f16_hi_half, v_f16_lo_half);
         hn::StoreU(v_f16_full, d16, out + i);
+    }
+    // SIMD PATH END
+#endif
+
+    // SCALAR/REMAINDER PATH: Process any remaining elements one by one.
+    // For the HWY_SCALAR target, this loop will handle all elements.
+    for (; i < num_floats; ++i) {
+        out[i] = hwy::ConvertScalarTo<hwy::float16_t>(in[i]);
     }
 }
 
@@ -83,12 +98,23 @@ void DemoteFloat32ToFloat16(const float* HWY_RESTRICT in, size_t num_floats, hwy
 void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out, size_t num_f16) {
     uint8_t* out_b0 = out;          // Plane for lower bytes
     uint8_t* out_b1 = out + num_f16; // Plane for higher bytes
-
+#if HWY_TARGET == HWY_SCALAR
+    // SCALAR PATH START
+    for (size_t i = 0; i < num_f16; ++i) {
+        const uint16_t val = hwy::BitCastScalar<uint16_t>(in[i]);
+        out_b0[i] = static_cast<uint8_t>(val & 0xFF);
+        out_b1[i] = static_cast<uint8_t>(val >> 8);
+    }
+    // SCALAR PATH END
+#else
+    // SIMD PATH START
     const hn::Repartition<uint8_t, decltype(du16)> d_u8_packed;
     const size_t lanes_u16 = hn::Lanes(du16);
 
     // Process two vectors' worth of data per loop because OrderedTruncate2To combines two vectors.
-    for (size_t i = 0; i < num_f16; i += 2 * lanes_u16) {
+    const size_t step = 2 * lanes_u16;
+    size_t i = 0;
+    for (; i + step <= num_f16; i += step) {
         // Load two vectors of float16 and view them as uint16
         const VU16 v_in_a = hn::BitCast(du16, hn::LoadU(d16, in + i));
         const VU16 v_in_b = hn::BitCast(du16, hn::LoadU(d16, in + i + lanes_u16));
@@ -109,6 +135,15 @@ void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT
         hn::StoreU(packed_lo, d_u8_packed, out_b0 + i);
         hn::StoreU(packed_hi, d_u8_packed, out_b1 + i);
     }
+
+    // Remainder loop for SIMD path (if num_f16 is not a multiple of `step`)
+    for (; i < num_f16; ++i) {
+        const uint16_t val = hwy::BitCastScalar<uint16_t>(in[i]);
+        out_b0[i] = static_cast<uint8_t>(val & 0xFF);
+        out_b1[i] = static_cast<uint8_t>(val >> 8);
+    }
+    // SIMD PATH END
+#endif
 }
 
 
@@ -123,8 +158,28 @@ void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY
     for (size_t s = 0; s < num_snapshots; ++s) {
         float* HWY_RESTRICT current_out_ptr = out + s * num_floats_per_snapshot;
         const size_t base_idx_bytes = s * num_floats_per_snapshot;
+#if HWY_TARGET == HWY_SCALAR
+        // SCALAR PATH START
+        for (size_t i = 0; i < num_floats_per_snapshot; ++i) {
+            const uint8_t b0 = shuffled_in[base_idx_bytes + i];
+            const uint8_t b1 = shuffled_in[total_floats + base_idx_bytes + i];
+            const uint16_t u16_val = (static_cast<uint16_t>(b1) << 8) | b0;
 
-        for (size_t i = 0; i < num_floats_per_snapshot; i += hn::Lanes(d16)) {
+            const auto f16_delta = hwy::BitCastScalar<hwy::float16_t>(u16_val);
+            const float f32_delta = hwy::ConvertScalarTo<float>(f16_delta);
+            const float prev_val = prev_snapshot_ptr[i];
+
+            const uint32_t recon_u32 = hwy::BitCastScalar<uint32_t>(f32_delta) ^ hwy::BitCastScalar<uint32_t>(prev_val);
+            current_out_ptr[i] = hwy::BitCastScalar<float>(recon_u32);
+        }
+        // SCALAR PATH END
+#else
+        // SIMD PATH START
+        const size_t f32_lanes = hn::Lanes(d32);
+        const size_t f16_lanes = hn::Lanes(d16);
+
+        // Process a full f16 vector's worth of floats at a time.
+        for (size_t i = 0; i < num_floats_per_snapshot; i += f16_lanes) {
             // Load bytes from the two separate planes (low bytes and high bytes).
             const hn::Rebind<uint8_t, decltype(d16)> d_u8_rebind;
             const auto v_b0 = hn::LoadU(d_u8_rebind, shuffled_in + base_idx_bytes + i);
@@ -142,7 +197,6 @@ void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY
             VF32 v_delta_f32_lo = hn::PromoteLowerTo(d32, v_delta_f16);
             VF32 v_delta_f32_hi = hn::PromoteUpperTo(d32, v_delta_f16);
 
-            const size_t f32_lanes = hn::Lanes(d32);
             VF32 v_prev_lo = hn::LoadU(d32, prev_snapshot_ptr + i);
             VF32 v_prev_hi = hn::LoadU(d32, prev_snapshot_ptr + i + f32_lanes);
 
@@ -152,6 +206,8 @@ void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY
             hn::StoreU(v_recon_lo, d32, current_out_ptr + i);
             hn::StoreU(v_recon_hi, d32, current_out_ptr + i + f32_lanes);
         }
+        // SIMD PATH END
+#endif
         prev_snapshot_ptr = current_out_ptr;
     }
     std::copy_n(prev_snapshot_ptr, num_floats_per_snapshot, last_snapshot_state.data());
