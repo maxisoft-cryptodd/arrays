@@ -1,13 +1,13 @@
-#include <benchmark/benchmark.h>
-#include <vector>
-#include <random>
-#include <numeric>
-#include "okx_ob_simd_codec.h"
+#include "orderbook_simd_codec.h"
 #include "zstd_compressor.h" // Include the concrete compressor
+#include <benchmark/benchmark.h>
+#include <numeric>
+#include <random>
+#include <vector>
 
 // Helper function to generate random snapshot data, adapted from the gtest file.
 static std::vector<float> generate_random_snapshots(size_t num_snapshots) {
-    std::vector<float> data(num_snapshots * cryptodd::OkxObSimdCodecDefault::SnapshotFloats);
+    std::vector<float> data(num_snapshots * cryptodd::OkxObSimdCodec::SnapshotFloats);
     std::mt19937 gen(1337); // Use a fixed seed for reproducible benchmark data
     std::uniform_real_distribution<> dis(-1000.0, 1000.0);
     for (float& val : data) {
@@ -29,7 +29,7 @@ public:
         std::iota(initial_prev_snapshot.begin(), initial_prev_snapshot.end(), 0.5f);
 
         // Create the codec with a standard ZstdCompressor for this benchmark run.
-        codec_ = std::make_unique<cryptodd::OkxObSimdCodecDefault>(
+        codec_ = std::make_unique<cryptodd::OkxObSimdCodec>(
             std::make_unique<cryptodd::ZstdCompressor>(-1)
         );
     }
@@ -41,8 +41,8 @@ public:
 
 protected:
     std::vector<float> original_data;
-    cryptodd::OkxObSimdCodecDefault::OkxSnapshot initial_prev_snapshot;
-    std::unique_ptr<cryptodd::OkxObSimdCodecDefault> codec_;
+    cryptodd::OkxObSimdCodec::Snapshot initial_prev_snapshot{};
+    std::unique_ptr<cryptodd::OkxObSimdCodec> codec_;
 };
 
 // Benchmark for the encode function
@@ -64,7 +64,7 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Decode16)(benchmark::State& state) {
 
     for (auto _ : state) {
         // The decoder modifies its previous snapshot state, so we must reset it for each run.
-        cryptodd::OkxObSimdCodecDefault::OkxSnapshot decoder_prev_snapshot = initial_prev_snapshot;
+        cryptodd::OkxObSimdCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
         // Call the decode method on the instance.
         std::vector<float> decoded_data = codec_->decode16(encoded_data, num_snapshots, decoder_prev_snapshot);
         benchmark::DoNotOptimize(decoded_data);
@@ -99,7 +99,7 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Decode32)(benchmark::State& state) {
     std::vector<uint8_t> encoded_data = codec_->encode32(original_data, initial_prev_snapshot);
 
     for (auto _ : state) {
-        cryptodd::OkxObSimdCodecDefault::OkxSnapshot decoder_prev_snapshot = initial_prev_snapshot;
+        cryptodd::OkxObSimdCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
         std::vector<float> decoded_data = codec_->decode32(encoded_data, num_snapshots, decoder_prev_snapshot);
         benchmark::DoNotOptimize(decoded_data);
     }
