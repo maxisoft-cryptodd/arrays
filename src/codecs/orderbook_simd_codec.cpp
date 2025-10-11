@@ -149,8 +149,8 @@ void DemoteFloat32ToFloat16(const float* HWY_RESTRICT in, size_t num_floats, hwy
 // This pattern de-interleaves float16 values (viewed as uint16_t) into two separate
 // planes of low bytes and high bytes. It is compatible with all SIMD targets (except HWY_SCALAR).
 void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out, size_t num_f16) {
-    uint8_t* out_b0 = out;          // Plane for lower bytes
-    uint8_t* out_b1 = out + num_f16; // Plane for higher bytes
+    uint8_t* HWY_RESTRICT out_b0 = out;          // Plane for lower bytes
+    uint8_t* HWY_RESTRICT out_b1 = out + num_f16; // Plane for higher bytes
 #if HWY_TARGET == HWY_SCALAR
     // SCALAR PATH START
     for (size_t i = 0; i < num_f16; ++i) {
