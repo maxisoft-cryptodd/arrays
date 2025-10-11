@@ -1,0 +1,152 @@
+#pragma once
+
+#include "i_compressor.h"
+#include <cstdint>
+#include <hwy/aligned_allocator.h>
+#include <memory>
+#include <span>
+#include <stdexcept>
+#include <vector>
+
+namespace cryptodd {
+
+// Forward declarations for SIMD functions, now in their own namespace
+namespace simd {
+    void DemoteAndXor1D_dispatcher(const float* data, hwy::float16_t* out, size_t num_elements, float prev_element);
+    void ShuffleFloat16_1D_dispatcher(const hwy::float16_t* in, uint8_t* out, size_t num_elements);
+    void UnshuffleAndReconstruct16_1D_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_elements, float& prev_element);
+
+    void XorFloat32_1D_dispatcher(const float* data, float* out, size_t num_elements, float prev_element);
+    void ShuffleFloat32_1D_dispatcher(const float* in, uint8_t* out, size_t num_elements);
+    void UnshuffleAndReconstruct32_1D_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_elements, float& prev_element);
+
+    void XorInt64_1D_dispatcher(const int64_t* data, int64_t* out, size_t num_elements, int64_t prev_element);
+    void UnXorInt64_1D_dispatcher(const int64_t* delta, int64_t* out, size_t num_elements, int64_t& prev_element);
+
+    void DeltaInt64_1D_dispatcher(const int64_t* data, int64_t* out, size_t num_elements, int64_t prev_element);
+    void CumulativeSumInt64_1D_dispatcher(const int64_t* delta, int64_t* out, size_t num_elements, int64_t& prev_element);
+}
+
+class Temporal1dSimdCodecWorkspace {
+public:
+    Temporal1dSimdCodecWorkspace() = default;
+    Temporal1dSimdCodecWorkspace(const Temporal1dSimdCodecWorkspace&) = delete;
+    Temporal1dSimdCodecWorkspace& operator=(const Temporal1dSimdCodecWorkspace&) = delete;
+    Temporal1dSimdCodecWorkspace(Temporal1dSimdCodecWorkspace&&) noexcept = default;
+    Temporal1dSimdCodecWorkspace& operator=(Temporal1dSimdCodecWorkspace&&) noexcept = default;
+
+    void ensure_capacity(size_t required_elements) {
+        if (capacity_in_elements_ >= required_elements) return;
+        const size_t required_bytes = required_elements * sizeof(int64_t);
+        buffer1_ = hwy::AllocateAligned<uint8_t>(required_bytes);
+        buffer2_ = hwy::AllocateAligned<uint8_t>(required_bytes);
+        if (!buffer1_ || !buffer2_) throw std::bad_alloc();
+        capacity_in_elements_ = required_elements;
+    }
+
+    [[nodiscard]] hwy::AlignedFreeUniquePtr<uint8_t[]>& buffer1() { return buffer1_; }
+    [[nodiscard]] hwy::AlignedFreeUniquePtr<uint8_t[]>& buffer2() { return buffer2_; }
+
+private:
+    hwy::AlignedFreeUniquePtr<uint8_t[]> buffer1_;
+    hwy::AlignedFreeUniquePtr<uint8_t[]> buffer2_;
+    size_t capacity_in_elements_ = 0;
+};
+
+class Temporal1dSimdCodec {
+public:
+    explicit Temporal1dSimdCodec(std::unique_ptr<ICompressor> compressor) : compressor_(std::move(compressor)) {
+        if (!compressor_) throw std::invalid_argument("Compressor cannot be null.");
+    }
+
+    // Chain: float32 -> demote to float16 -> XOR -> shuffle
+    std::vector<uint8_t> encode16_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
+    std::vector<float> decode16_Xor_Shuffle(std::span<const uint8_t> compressed, size_t num_elements, float& prev_element) const;
+
+    // Chain: float32 -> XOR -> shuffle
+    std::vector<uint8_t> encode32_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
+    std::vector<float> decode32_Xor_Shuffle(std::span<const uint8_t> compressed, size_t num_elements, float& prev_element) const;
+
+    // Chain: int64 -> XOR
+    std::vector<uint8_t> encode64_Xor(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
+    std::vector<int64_t> decode64_Xor(std::span<const uint8_t> compressed, size_t num_elements, int64_t& prev_element) const;
+
+    // Chain: int64 -> delta (subtraction)
+    std::vector<uint8_t> encode64_Delta(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
+    std::vector<int64_t> decode64_Delta(std::span<const uint8_t> compressed, size_t num_elements, int64_t& prev_element) const;
+
+private:
+    std::unique_ptr<ICompressor> compressor_;
+};
+
+// --- Implementation for Temporal1dSimdCodec ---
+
+inline std::vector<uint8_t> Temporal1dSimdCodec::encode16_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
+    workspace.ensure_capacity(data.size());
+    auto* f16_deltas = reinterpret_cast<hwy::float16_t*>(workspace.buffer1().get());
+    simd::DemoteAndXor1D_dispatcher(data.data(), f16_deltas, data.size(), prev_element);
+    
+    auto* shuffled_bytes = workspace.buffer2().get();
+    simd::ShuffleFloat16_1D_dispatcher(f16_deltas, shuffled_bytes, data.size());
+    
+    return compressor_->compress({shuffled_bytes, data.size() * sizeof(hwy::float16_t)});
+}
+
+inline std::vector<float> Temporal1dSimdCodec::decode16_Xor_Shuffle(std::span<const uint8_t> compressed, size_t num_elements, float& prev_element) const {
+    std::vector<uint8_t> shuffled_bytes = compressor_->decompress(compressed);
+    if (shuffled_bytes.size() != num_elements * sizeof(hwy::float16_t)) throw std::runtime_error("Decompressed data size mismatch");
+    std::vector<float> out_data(num_elements);
+    simd::UnshuffleAndReconstruct16_1D_dispatcher(shuffled_bytes.data(), out_data.data(), num_elements, prev_element);
+    return out_data;
+}
+
+inline std::vector<uint8_t> Temporal1dSimdCodec::encode32_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
+    workspace.ensure_capacity(data.size());
+    auto* f32_deltas = reinterpret_cast<float*>(workspace.buffer1().get());
+    simd::XorFloat32_1D_dispatcher(data.data(), f32_deltas, data.size(), prev_element);
+
+    auto* shuffled_bytes = workspace.buffer2().get();
+    simd::ShuffleFloat32_1D_dispatcher(f32_deltas, shuffled_bytes, data.size());
+
+    return compressor_->compress({shuffled_bytes, data.size() * sizeof(float)});
+}
+
+inline std::vector<float> Temporal1dSimdCodec::decode32_Xor_Shuffle(std::span<const uint8_t> compressed, size_t num_elements, float& prev_element) const {
+    std::vector<uint8_t> shuffled_bytes = compressor_->decompress(compressed);
+    if (shuffled_bytes.size() != num_elements * sizeof(float)) throw std::runtime_error("Decompressed data size mismatch");
+    std::vector<float> out_data(num_elements);
+    simd::UnshuffleAndReconstruct32_1D_dispatcher(shuffled_bytes.data(), out_data.data(), num_elements, prev_element);
+    return out_data;
+}
+
+inline std::vector<uint8_t> Temporal1dSimdCodec::encode64_Xor(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
+    workspace.ensure_capacity(data.size());
+    auto* i64_deltas = reinterpret_cast<int64_t*>(workspace.buffer1().get());
+    simd::XorInt64_1D_dispatcher(data.data(), i64_deltas, data.size(), prev_element);
+    return compressor_->compress({reinterpret_cast<uint8_t*>(i64_deltas), data.size() * sizeof(int64_t)});
+}
+
+inline std::vector<int64_t> Temporal1dSimdCodec::decode64_Xor(std::span<const uint8_t> compressed, size_t num_elements, int64_t& prev_element) const {
+    std::vector<uint8_t> delta_bytes = compressor_->decompress(compressed);
+    if (delta_bytes.size() != num_elements * sizeof(int64_t)) throw std::runtime_error("Decompressed data size mismatch");
+    std::vector<int64_t> out_data(num_elements);
+    simd::UnXorInt64_1D_dispatcher(reinterpret_cast<const int64_t*>(delta_bytes.data()), out_data.data(), num_elements, prev_element);
+    return out_data;
+}
+
+inline std::vector<uint8_t> Temporal1dSimdCodec::encode64_Delta(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
+    workspace.ensure_capacity(data.size());
+    auto* i64_deltas = reinterpret_cast<int64_t*>(workspace.buffer1().get());
+    simd::DeltaInt64_1D_dispatcher(data.data(), i64_deltas, data.size(), prev_element);
+    return compressor_->compress({reinterpret_cast<uint8_t*>(i64_deltas), data.size() * sizeof(int64_t)});
+}
+
+inline std::vector<int64_t> Temporal1dSimdCodec::decode64_Delta(std::span<const uint8_t> compressed, size_t num_elements, int64_t& prev_element) const {
+    std::vector<uint8_t> delta_bytes = compressor_->decompress(compressed);
+    if (delta_bytes.size() != num_elements * sizeof(int64_t)) throw std::runtime_error("Decompressed data size mismatch");
+    std::vector<int64_t> out_data(num_elements);
+    simd::CumulativeSumInt64_1D_dispatcher(reinterpret_cast<const int64_t*>(delta_bytes.data()), out_data.data(), num_elements, prev_element);
+    return out_data;
+}
+
+} // namespace cryptodd

@@ -43,6 +43,8 @@ add_library(cryptodd_arrays STATIC
     src/data_io/data_reader.cpp
     src/codecs/zstd_compressor.cpp
     src/codecs/orderbook_simd_codec.cpp
+    src/codecs/temporal_1d_simd_codec.cpp
+    src/codecs/temporal_2d_simd_codec.cpp
 )
 
 # Enable dynamic dispatch for the library target
@@ -99,17 +101,40 @@ target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays)
 add_executable(cryptodd_arrays_test
         test/lib_simple_tests.cpp
         test/cdd_file_tests.cpp
-        test/codecs/orderbook_simd_codec_test.cpp)
+        test/codecs/orderbook_simd_codec_test.cpp
+        test/codecs/temporal_1d_simd_codec_test.cpp
+        test/codecs/temporal_2d_simd_codec_test.cpp)
 target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays cryptodd_arrays_shared stduuid)
 
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)
 
 # Add a benchmark executable
-add_executable(cryptodd_arrays_benchmark
+add_executable(orderbook_simd_benchmark
         benchmark/codecs/orderbook_simd_codec_benchmark.cpp
+        benchmark/codecs/temporal_1d_simd_codec_benchmark.cpp
+        benchmark/codecs/temporal_2d_simd_codec_benchmark.cpp
 )
-target_link_libraries(cryptodd_arrays_benchmark PRIVATE
+
+target_link_libraries(orderbook_simd_benchmark PRIVATE
+        benchmark::benchmark
+        cryptodd_arrays
+)
+
+# Add a benchmark executable for the new 1D codec
+add_executable(temporal_1d_simd_benchmark
+        benchmark/codecs/temporal_1d_simd_codec_benchmark.cpp
+)
+target_link_libraries(temporal_1d_simd_benchmark PRIVATE
+        benchmark::benchmark
+        cryptodd_arrays
+)
+
+# Add a benchmark executable for the new 2D codec
+add_executable(temporal_2d_simd_benchmark
+        benchmark/codecs/temporal_2d_simd_codec_benchmark.cpp
+)
+target_link_libraries(temporal_2d_simd_benchmark PRIVATE
         benchmark::benchmark
         cryptodd_arrays
 )
