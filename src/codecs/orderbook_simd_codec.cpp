@@ -343,10 +343,10 @@ void UnshuffleAndReconstructFloat32(const uint8_t* HWY_RESTRICT shuffled_in, flo
             const VU32 delta_d = hn::ZipUpper(d_u32_from_u16, t0_cd, t1_cd);
 
             // Load previous state
-            const VF32 prev_a = hn::LoadU(d32, prev_snapshot_ptr + i + 0 * lanes_u32);
-            const VF32 prev_b = hn::LoadU(d32, prev_snapshot_ptr + i + 1 * lanes_u32);
-            const VF32 prev_c = hn::LoadU(d32, prev_snapshot_ptr + i + 2 * lanes_u32);
-            const VF32 prev_d = hn::LoadU(d32, prev_snapshot_ptr + i + 3 * lanes_u32);
+            const VF32 prev_a = hn::Load(d32, prev_snapshot_ptr + i + 0 * lanes_u32);
+            const VF32 prev_b = hn::Load(d32, prev_snapshot_ptr + i + 1 * lanes_u32);
+            const VF32 prev_c = hn::Load(d32, prev_snapshot_ptr + i + 2 * lanes_u32);
+            const VF32 prev_d = hn::Load(d32, prev_snapshot_ptr + i + 3 * lanes_u32);
 
             // Reconstruct by XORing
             const VF32 recon_a = hn::BitCast(d32, hn::Xor(delta_a, hn::BitCast(du32, prev_a)));
@@ -355,10 +355,10 @@ void UnshuffleAndReconstructFloat32(const uint8_t* HWY_RESTRICT shuffled_in, flo
             const VF32 recon_d = hn::BitCast(d32, hn::Xor(delta_d, hn::BitCast(du32, prev_d)));
 
             // Store results to prev state and final output
-            hn::StoreU(recon_a, d32, prev_snapshot_ptr + i + 0 * lanes_u32);
-            hn::StoreU(recon_b, d32, prev_snapshot_ptr + i + 1 * lanes_u32);
-            hn::StoreU(recon_c, d32, prev_snapshot_ptr + i + 2 * lanes_u32);
-            hn::StoreU(recon_d, d32, prev_snapshot_ptr + i + 3 * lanes_u32);
+            hn::Store(recon_a, d32, prev_snapshot_ptr + i + 0 * lanes_u32);
+            hn::Store(recon_b, d32, prev_snapshot_ptr + i + 1 * lanes_u32);
+            hn::Store(recon_c, d32, prev_snapshot_ptr + i + 2 * lanes_u32);
+            hn::Store(recon_d, d32, prev_snapshot_ptr + i + 3 * lanes_u32);
 
             hn::StoreU(recon_a, d32, current_out_ptr + i + 0 * lanes_u32);
             hn::StoreU(recon_b, d32, current_out_ptr + i + 1 * lanes_u32);
@@ -438,7 +438,7 @@ void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY
             VU16 v_delta_u16 = hn::Combine(du16, v_interleaved_hi, v_interleaved_lo);
 
             // Load previous state (as float16)
-            VF16 v_prev_f16 = hn::LoadU(d16, prev_snapshot_ptr + i);
+            VF16 v_prev_f16 = hn::Load(d16, prev_snapshot_ptr + i);
             VU16 v_prev_u16 = hn::BitCast(du16, v_prev_f16);
 
             // Reconstruct the float16 bit pattern
@@ -446,7 +446,7 @@ void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY
             VF16 v_recon_f16 = hn::BitCast(d16, v_recon_u16);
 
             // This result IS the new state for the next snapshot. Store it back.
-            hn::StoreU(v_recon_f16, d16, prev_snapshot_ptr + i);
+            hn::Store(v_recon_f16, d16, prev_snapshot_ptr + i);
 
             // Promote the final reconstructed float16 to float32 for output
             VF32 v_out_f32_lo = hn::PromoteLowerTo(d32, v_recon_f16);
