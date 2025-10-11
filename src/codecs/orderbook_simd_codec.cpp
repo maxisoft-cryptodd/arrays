@@ -12,19 +12,27 @@
 // These headers are needed for the SIMD implementations below
 #include "hwy/aligned_allocator.h"
 
+#ifndef HWY_TARGET_INCLUDE
+// Important: never ever include here ! #include <hwy/highway.h>
+#ifdef HWY_HIGHWAY_INCLUDED
+static_assert(false, "highway.h is already included !");
+#endif
+#endif
+
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "orderbook_simd_codec.cpp" // This file includes itself
 #include "hwy/foreach_target.h"
 
 // Must come after foreach_target.h to avoid redefinition errors.
 #include "hwy/highway.h"
+#include "hwy/cache_control.h"
 
 // =================================================================================
 // FORWARD DECLARATIONS for Highway's dynamic dispatch
 // =================================================================================
 namespace cryptodd::HWY_NAMESPACE {
     // We pass SnapshotFloats as an argument now instead of using a global constexpr
-    void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out,
+    void UnshuffleAndReconstruct16(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out,
                                  size_t num_snapshots, size_t snapshot_floats,
                                  std::span<float> last_snapshot_state);
 
@@ -65,7 +73,7 @@ using VF16 = hn::Vec<hn::ScalableTag<hwy::float16_t>>;
 using VU16 = hn::Vec<hn::ScalableTag<uint16_t>>;
 
 // New combined function: Demote float32 to float16, then XOR their bit patterns.
-void DemoteAndXor(const float* HWY_RESTRICT current, const float* HWY_RESTRICT prev,
+HWY_NOINLINE void DemoteAndXor(const float* HWY_RESTRICT current, const float* HWY_RESTRICT prev,
                   hwy::float16_t* HWY_RESTRICT out, size_t num_floats) {
     size_t i = 0;
 
@@ -114,7 +122,7 @@ void DemoteAndXor(const float* HWY_RESTRICT current, const float* HWY_RESTRICT p
     }
 }
 
-void DemoteFloat32ToFloat16(const float* HWY_RESTRICT in, size_t num_floats, hwy::float16_t* HWY_RESTRICT out) {
+HWY_NOINLINE void DemoteFloat32ToFloat16(const float* HWY_RESTRICT in, size_t num_floats, hwy::float16_t* HWY_RESTRICT out) {
     size_t i = 0;
 
 #if HWY_TARGET != HWY_SCALAR
@@ -148,7 +156,7 @@ void DemoteFloat32ToFloat16(const float* HWY_RESTRICT in, size_t num_floats, hwy
 
 // This pattern de-interleaves float16 values (viewed as uint16_t) into two separate
 // planes of low bytes and high bytes. It is compatible with all SIMD targets (except HWY_SCALAR).
-void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out, size_t num_f16) {
+HWY_NOINLINE void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out, size_t num_f16) {
     uint8_t* HWY_RESTRICT out_b0 = out;          // Plane for lower bytes
     uint8_t* HWY_RESTRICT out_b1 = out + num_f16; // Plane for higher bytes
 #if HWY_TARGET == HWY_SCALAR
@@ -233,7 +241,7 @@ HWY_NOINLINE void XorFloat32(const float* HWY_RESTRICT current, const float* HWY
     }
 }
 
-void ShuffleFloat32(const float* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out, size_t num_f32) {
+HWY_NOINLINE void ShuffleFloat32(const float* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out, size_t num_f32) {
     uint8_t* HWY_RESTRICT out_b0 = out;
     uint8_t* HWY_RESTRICT out_b1 = out + num_f32;
     uint8_t* HWY_RESTRICT out_b2 = out + 2 * num_f32;
@@ -306,7 +314,23 @@ void UnshuffleAndReconstructFloat32(const uint8_t* HWY_RESTRICT shuffled_in, flo
     std::copy_n(last_snapshot_state.data(), num_floats_per_snapshot, prev_snapshot_f32.get());
     float* HWY_RESTRICT prev_snapshot_ptr = prev_snapshot_f32.get();
 
+    // How many snapshots ahead we want to prefetch. This is a tuning parameter.
+    // A value of 1-4 is often a good starting point.
+    constexpr size_t kPrefetchSnapshots = 2;
+
     for (size_t s = 0; s < num_snapshots; ++s) {
+        // --- Prefetching Logic ---
+        // Issue hints to the CPU to start loading data for a future snapshot.
+        // This helps hide memory latency. We must check boundaries to avoid
+        // reading past the end of the array.
+        if (s + kPrefetchSnapshots < num_snapshots) {
+            const size_t next_base_idx = (s + kPrefetchSnapshots) * num_floats_per_snapshot;
+            hwy::Prefetch(shuffled_in + next_base_idx);
+            hwy::Prefetch(shuffled_in + total_floats + next_base_idx);
+            hwy::Prefetch(shuffled_in + 2 * total_floats + next_base_idx);
+            hwy::Prefetch(shuffled_in + 3 * total_floats + next_base_idx);
+        }
+
         float* HWY_RESTRICT current_out_ptr = out + s * num_floats_per_snapshot;
         const size_t base_idx = s * num_floats_per_snapshot;
         const uint8_t* HWY_RESTRICT in_b0 = shuffled_in + base_idx;
@@ -384,7 +408,7 @@ void UnshuffleAndReconstructFloat32(const uint8_t* HWY_RESTRICT shuffled_in, flo
 
 // --- DECODING PIPELINE ---
 
-void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out,
+void UnshuffleAndReconstruct16(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out,
                              size_t num_snapshots, size_t snapshot_floats,
                              std::span<float> last_snapshot_state) {
     const size_t num_floats_per_snapshot = snapshot_floats;
@@ -395,9 +419,21 @@ void UnshuffleAndReconstruct(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY
     auto prev_snapshot_f16 = hwy::AllocateAligned<hwy::float16_t>(num_floats_per_snapshot);
     DemoteFloat32ToFloat16(last_snapshot_state.data(), num_floats_per_snapshot, prev_snapshot_f16.get());    hwy::float16_t* HWY_RESTRICT prev_snapshot_ptr = prev_snapshot_f16.get();
 
+    // How many snapshots ahead we want to prefetch. This is a tuning parameter.
+    constexpr size_t kPrefetchSnapshots = 1;
+
     for (size_t s = 0; s < num_snapshots; ++s) {
         float* HWY_RESTRICT current_out_ptr = out + s * num_floats_per_snapshot;
         const size_t base_idx_bytes = s * num_floats_per_snapshot;
+
+        // --- Prefetching Logic ---
+        // Issue hints for the two byte planes for a future snapshot.
+        if (s + kPrefetchSnapshots < num_snapshots) {
+            const size_t next_base_idx = (s + kPrefetchSnapshots) * num_floats_per_snapshot;
+            hwy::Prefetch(shuffled_in + next_base_idx);
+            hwy::Prefetch(shuffled_in + total_floats + next_base_idx);
+        }
+
 #if HWY_TARGET == HWY_SCALAR
         // SCALAR PATH START
         for (size_t i = 0; i < num_floats_per_snapshot; ++i) {
@@ -478,32 +514,32 @@ namespace cryptodd {
 
 // Define dispatchers that the header-based template functions can call.
 HWY_EXPORT(DemoteAndXor);
-void DemoteAndXor_dispatcher(const float* current, const float* prev, hwy::float16_t* out, size_t num_floats) {
+HWY_NOINLINE void DemoteAndXor_dispatcher(const float* current, const float* prev, hwy::float16_t* out, size_t num_floats) {
     HWY_DYNAMIC_DISPATCH(DemoteAndXor)(current, prev, out, num_floats);
 }
 
 HWY_EXPORT(ShuffleFloat16);
-void ShuffleFloat16_dispatcher(const hwy::float16_t* in, uint8_t* out, size_t num_f16) {
+HWY_NOINLINE void ShuffleFloat16_dispatcher(const hwy::float16_t* in, uint8_t* out, size_t num_f16) {
     HWY_DYNAMIC_DISPATCH(ShuffleFloat16)(in, out, num_f16);
 }
 
-HWY_EXPORT(UnshuffleAndReconstruct);
-void UnshuffleAndReconstruct_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
-    HWY_DYNAMIC_DISPATCH(UnshuffleAndReconstruct)(shuffled_in, out, num_snapshots, snapshot_floats, last_snapshot_state);
+HWY_EXPORT(UnshuffleAndReconstruct16);
+HWY_NOINLINE void UnshuffleAndReconstruct_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
+    HWY_DYNAMIC_DISPATCH(UnshuffleAndReconstruct16)(shuffled_in, out, num_snapshots, snapshot_floats, last_snapshot_state);
 }
 
 HWY_EXPORT(XorFloat32);
-void XorFloat32_dispatcher(const float* current, const float* prev, float* out, size_t num_floats) {
+HWY_NOINLINE void XorFloat32_dispatcher(const float* current, const float* prev, float* out, size_t num_floats) {
     HWY_DYNAMIC_DISPATCH(XorFloat32)(current, prev, out, num_floats);
 }
 
 HWY_EXPORT(ShuffleFloat32);
-void ShuffleFloat32_dispatcher(const float* in, uint8_t* out, size_t num_f32) {
+HWY_NOINLINE void ShuffleFloat32_dispatcher(const float* in, uint8_t* out, size_t num_f32) {
     HWY_DYNAMIC_DISPATCH(ShuffleFloat32)(in, out, num_f32);
 }
 
 HWY_EXPORT(UnshuffleAndReconstructFloat32);
-void UnshuffleAndReconstructFloat32_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
+HWY_NOINLINE void UnshuffleAndReconstructFloat32_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
     HWY_DYNAMIC_DISPATCH(UnshuffleAndReconstructFloat32)(shuffled_in, out, num_snapshots, snapshot_floats, last_snapshot_state);
 }
 
