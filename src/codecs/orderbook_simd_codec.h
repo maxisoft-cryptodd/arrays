@@ -23,28 +23,108 @@ void UnshuffleAndReconstruct_dispatcher(const uint8_t* shuffled_in, float* out, 
 void XorFloat32_dispatcher(const float* current, const float* prev, float* out, size_t num_floats);
 void ShuffleFloat32_dispatcher(const float* in, uint8_t* out, size_t num_f32);
 void UnshuffleAndReconstructFloat32_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state);
+class OrderbookSimdCodecWorkspace;
 
-// A public struct to hold all reusable temporary buffers for encoding.
-// The user of the codec is responsible for creating and managing this struct.
-struct OrderbookSimdCodecWorkspace {
-    hwy::AlignedFreeUniquePtr<hwy::float16_t[]> f16_deltas;
-    hwy::AlignedFreeUniquePtr<float[]> f32_deltas;
-    hwy::AlignedFreeUniquePtr<uint8_t[]> shuffled_bytes;
-    size_t capacity_in_floats = 0;
-};
+namespace detail {
+    // Forward declare implementation functions that need privileged access to the workspace.
+    inline std::vector<uint8_t> encode16_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
+                                              size_t num_snapshots, size_t snapshot_floats, ICompressor& compressor,
+                                              OrderbookSimdCodecWorkspace& workspace);
 
-// A helper function to ensure the workspace has enough capacity.
-// This will only re-allocate if the required size is larger than the current capacity.
-inline void EnsureCapacity(OrderbookSimdCodecWorkspace& workspace, size_t required_floats) {
-    if (workspace.capacity_in_floats >= required_floats) return;
-
-    workspace.f16_deltas = hwy::AllocateAligned<hwy::float16_t>(required_floats);
-    workspace.f32_deltas = hwy::AllocateAligned<float>(required_floats);
-    // Allocate enough for the largest possible shuffle (float32)
-    workspace.shuffled_bytes = hwy::AllocateAligned<uint8_t>(required_floats * sizeof(float));
-
-    workspace.capacity_in_floats = required_floats;
+    inline std::vector<uint8_t> encode32_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
+                                              size_t num_snapshots, size_t snapshot_floats, ICompressor& compressor,
+                                              OrderbookSimdCodecWorkspace& workspace);
 }
+
+/**
+ * @brief Manages reusable, SIMD-friendly aligned memory buffers for encoding operations.
+ *
+ * This class provides a safe, modern C++ interface for managing memory while allowing
+ * tightly-coupled implementation details (via `friend`) to access the raw aligned pointers
+ * necessary for high-performance SIMD code. It is non-copyable but movable.
+ */
+class OrderbookSimdCodecWorkspace {
+public:
+    OrderbookSimdCodecWorkspace() = default;
+
+    // This class manages memory, so it's non-copyable but movable.
+    OrderbookSimdCodecWorkspace(const OrderbookSimdCodecWorkspace&) = delete;
+    OrderbookSimdCodecWorkspace& operator=(const OrderbookSimdCodecWorkspace&) = delete;
+    OrderbookSimdCodecWorkspace(OrderbookSimdCodecWorkspace&&) noexcept = default;
+    OrderbookSimdCodecWorkspace& operator=(OrderbookSimdCodecWorkspace&&) noexcept = default;
+
+    /**
+     * @brief Ensures the workspace has enough capacity to process a given number of floats.
+     * Reallocates memory if the current capacity is insufficient. This can be an expensive operation.
+     * @param required_floats The minimum number of floats the workspace must be able to hold.
+     */
+    void ensure_capacity(const size_t required_floats) {
+        if (capacity_in_floats_ >= required_floats) return;
+        f16_deltas_ = hwy::AllocateAligned<hwy::float16_t>(required_floats);
+        f32_deltas_ = hwy::AllocateAligned<float>(required_floats);
+        shuffled_bytes_ = hwy::AllocateAligned<uint8_t>(required_floats * sizeof(float));
+
+        if (!f16_deltas_ || !f32_deltas_ || !shuffled_bytes_) {
+            throw std::bad_alloc();
+        }
+
+        capacity_in_floats_ = required_floats;
+    }
+
+    /**
+     * @brief Returns the current capacity of the workspace in number of floats.
+     */
+    [[nodiscard]] size_t capacity() const noexcept { return capacity_in_floats_; }
+
+    /**
+     * @brief Returns a span over the float16 delta buffer.
+     */
+    [[nodiscard]] std::span<hwy::float16_t> f16_deltas() noexcept {
+        return {f16_deltas_.get(), capacity_in_floats_};
+    }
+
+    /**
+     * @brief Returns a const span over the float16 delta buffer.
+     */
+    [[nodiscard]] std::span<const hwy::float16_t> f16_deltas() const noexcept {
+        return {f16_deltas_.get(), capacity_in_floats_};
+    }
+
+    /**
+     * @brief Returns a span over the float32 delta buffer.
+     */
+    [[nodiscard]] std::span<float> f32_deltas() noexcept { return {f32_deltas_.get(), capacity_in_floats_}; }
+
+    /**
+     * @brief Returns a const span over the float32 delta buffer.
+     */
+    [[nodiscard]] std::span<const float> f32_deltas() const noexcept { return {f32_deltas_.get(), capacity_in_floats_}; }
+
+    /**
+     * @brief Returns a span over the shuffled bytes buffer.
+     */
+    [[nodiscard]] std::span<uint8_t> shuffled_bytes() noexcept {
+        return {shuffled_bytes_.get(), capacity_in_floats_ * sizeof(float)};
+    }
+
+    /**
+     * @brief Returns a const span over the shuffled bytes buffer.
+     */
+    [[nodiscard]] std::span<const uint8_t> shuffled_bytes() const noexcept {
+        return {shuffled_bytes_.get(), capacity_in_floats_ * sizeof(float)};
+    }
+
+private:
+    // Grant access to our internal implementation functions. They need the raw
+    // hwy::AlignedFreeUniquePtr to guarantee the alignment contract for SIMD operations.
+    friend std::vector<uint8_t> detail::encode16_impl(std::span<const float>, std::span<const float>, size_t, size_t, ICompressor&, OrderbookSimdCodecWorkspace&);
+    friend std::vector<uint8_t> detail::encode32_impl(std::span<const float>, std::span<const float>, size_t, size_t, ICompressor&, OrderbookSimdCodecWorkspace&);
+
+    hwy::AlignedFreeUniquePtr<hwy::float16_t[]> f16_deltas_;
+    hwy::AlignedFreeUniquePtr<float[]> f32_deltas_;
+    hwy::AlignedFreeUniquePtr<uint8_t[]> shuffled_bytes_;
+    size_t capacity_in_floats_ = 0;
+};
 
 namespace detail {
 
@@ -52,20 +132,22 @@ inline std::vector<uint8_t> encode16_impl(std::span<const float> snapshots, std:
                                           size_t num_snapshots, size_t snapshot_floats, ICompressor& compressor,
                                           OrderbookSimdCodecWorkspace& workspace) {
     const size_t num_floats = snapshots.size();
+    hwy::float16_t* f16_deltas_ptr = workspace.f16_deltas_.get();
 
-    DemoteAndXor_dispatcher(snapshots.data(), prev_snapshot.data(), workspace.f16_deltas.get(), snapshot_floats);
+    DemoteAndXor_dispatcher(snapshots.data(), prev_snapshot.data(), f16_deltas_ptr, snapshot_floats);
     for (size_t s = 1; s < num_snapshots; ++s) {
         const float* current_snap = snapshots.data() + s * snapshot_floats;
         const float* prev_snap = snapshots.data() + (s - 1) * snapshot_floats;
-        hwy::float16_t* out_snap = workspace.f16_deltas.get() + s * snapshot_floats;
+        hwy::float16_t* out_snap = f16_deltas_ptr + s * snapshot_floats;
         DemoteAndXor_dispatcher(current_snap, prev_snap, out_snap, snapshot_floats);
     }
 
-    ShuffleFloat16_dispatcher(workspace.f16_deltas.get(), workspace.shuffled_bytes.get(), num_floats);
-
     const size_t f16_bytes = num_floats * sizeof(hwy::float16_t);
-    std::span<const uint8_t> data_to_compress(workspace.shuffled_bytes.get(), f16_bytes);
+    uint8_t* shuffled_bytes_ptr = workspace.shuffled_bytes_.get();
 
+    ShuffleFloat16_dispatcher(f16_deltas_ptr, shuffled_bytes_ptr, num_floats);
+
+    std::span<const uint8_t> data_to_compress(shuffled_bytes_ptr, f16_bytes);
     return compressor.compress(data_to_compress);
 }
 
@@ -73,20 +155,21 @@ inline std::vector<uint8_t> encode32_impl(std::span<const float> snapshots, std:
                                           size_t num_snapshots, size_t snapshot_floats, ICompressor& compressor,
                                           OrderbookSimdCodecWorkspace& workspace) {
     const size_t num_floats = snapshots.size();
+    float* f32_deltas_ptr = workspace.f32_deltas_.get();
 
-    XorFloat32_dispatcher(snapshots.data(), prev_snapshot.data(), workspace.f32_deltas.get(), snapshot_floats);
+    XorFloat32_dispatcher(snapshots.data(), prev_snapshot.data(), f32_deltas_ptr, snapshot_floats);
     for (size_t s = 1; s < num_snapshots; ++s) {
         const float* current_snap = snapshots.data() + s * snapshot_floats;
         const float* prev_snap = snapshots.data() + (s - 1) * snapshot_floats;
-        float* out_snap = workspace.f32_deltas.get() + s * snapshot_floats;
+        float* out_snap = f32_deltas_ptr + s * snapshot_floats;
         XorFloat32_dispatcher(current_snap, prev_snap, out_snap, snapshot_floats);
     }
 
-    ShuffleFloat32_dispatcher(workspace.f32_deltas.get(), workspace.shuffled_bytes.get(), num_floats);
-
     const size_t f32_bytes = num_floats * sizeof(float);
-    std::span<const uint8_t> data_to_compress(workspace.shuffled_bytes.get(), f32_bytes);
+    uint8_t* shuffled_bytes_ptr = workspace.shuffled_bytes_.get();
+    ShuffleFloat32_dispatcher(f32_deltas_ptr, shuffled_bytes_ptr, num_floats);
 
+    std::span<const uint8_t> data_to_compress(shuffled_bytes_ptr, f32_bytes);
     return compressor.compress(data_to_compress);
 }
 
@@ -131,7 +214,7 @@ inline std::vector<uint8_t> DynamicOrderbookSimdCodec::encode16(std::span<const 
     if (num_floats == 0 || num_floats % snapshot_floats_ != 0) {
         throw std::runtime_error("Snapshot data size is not a multiple of the configured snapshot_floats.");
     }
-    EnsureCapacity(workspace, num_floats);
+    workspace.ensure_capacity(num_floats);
     return detail::encode16_impl(snapshots, prev_snapshot, num_floats / snapshot_floats_, snapshot_floats_, *compressor_, workspace);
 }
 
@@ -163,7 +246,7 @@ inline std::vector<uint8_t> DynamicOrderbookSimdCodec::encode32(std::span<const 
     if (num_floats == 0 || num_floats % snapshot_floats_ != 0) {
         throw std::runtime_error("Snapshot data size is not a multiple of the configured snapshot_floats.");
     }
-    EnsureCapacity(workspace, num_floats);
+    workspace.ensure_capacity(num_floats);
     return detail::encode32_impl(snapshots, prev_snapshot, num_floats / snapshot_floats_, snapshot_floats_, *compressor_, workspace);
 }
 
@@ -225,7 +308,7 @@ std::vector<uint8_t> OrderbookSimdCodec<Depth, Features>::encode16(std::span<con
     if (num_floats == 0 || num_floats % SnapshotFloats != 0) {
         throw std::runtime_error("Snapshot data size is not a multiple of the configured SnapshotFloats.");
     }
-    EnsureCapacity(workspace, num_floats);
+    workspace.ensure_capacity(num_floats);
     return detail::encode16_impl(snapshots, {prev_snapshot.data(), SnapshotFloats}, num_floats / SnapshotFloats, SnapshotFloats, *compressor_, workspace);
 }
 
@@ -253,7 +336,7 @@ std::vector<uint8_t> OrderbookSimdCodec<Depth, Features>::encode32(std::span<con
     if (num_floats == 0 || num_floats % SnapshotFloats != 0) {
         throw std::runtime_error("Snapshot data size is not a multiple of the configured SnapshotFloats.");
     }
-    EnsureCapacity(workspace, num_floats);
+    workspace.ensure_capacity(num_floats);
     return detail::encode32_impl(snapshots, {prev_snapshot.data(), SnapshotFloats}, num_floats / SnapshotFloats, SnapshotFloats, *compressor_, workspace);
 }
 
