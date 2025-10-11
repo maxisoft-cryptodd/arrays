@@ -44,14 +44,14 @@ protected:
 TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_NoDictionary)
 {
     // 1. Create a codec instance without a dictionary
-    OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>());
+    OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>());    cryptodd::OrderbookSimdCodecWorkspace workspace;
 
     // The decoder needs the same starting state to begin reconstruction.
     OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data
     std::vector<uint8_t> encoded_data;
-    ASSERT_NO_THROW(encoded_data = codec.encode16(original_data, initial_prev_snapshot));
+    ASSERT_NO_THROW(encoded_data = codec.encode16(original_data, initial_prev_snapshot, workspace));
     ASSERT_FALSE(encoded_data.empty());
 
     // 3. Decode the data
@@ -92,14 +92,14 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_WithDictionary)
     dictBuffer.resize(dict_size);
 
     // 1. Create a codec instance without a dictionary
-    OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>(dictBuffer));
+    OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>(dictBuffer));    cryptodd::OrderbookSimdCodecWorkspace workspace;
 
     // The decoder needs the same starting state to begin reconstruction.
     OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data
     std::vector<uint8_t> encoded_data;
-    ASSERT_NO_THROW(encoded_data = codec.encode16(original_data, initial_prev_snapshot));
+    ASSERT_NO_THROW(encoded_data = codec.encode16(original_data, initial_prev_snapshot, workspace));
     ASSERT_FALSE(encoded_data.empty());
 
     // 3. Decode the data
@@ -127,14 +127,15 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_WithDictionary)
 TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_Float32)
 {
     // 1. Create a codec instance
-    OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>());
+    OkxCodec codec(
+std::make_unique<cryptodd::ZstdCompressor>());    cryptodd::OrderbookSimdCodecWorkspace workspace;
 
     // The decoder needs the same starting state to begin reconstruction.
     OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data using the float32 pipeline
     std::vector<uint8_t> encoded_data;
-    ASSERT_NO_THROW(encoded_data = codec.encode32(original_data, initial_prev_snapshot));
+    ASSERT_NO_THROW(encoded_data = codec.encode32(original_data, initial_prev_snapshot, workspace));
     ASSERT_FALSE(encoded_data.empty());
 
     // 3. Decode the data
