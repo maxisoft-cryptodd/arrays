@@ -1,13 +1,13 @@
-#include <gtest/gtest.h>
-#include <vector>
-#include <random>
-#include <numeric>
-#include "okx_ob_simd_codec.h"
-#include "zstd_compressor.h" // Include the concrete compressor
-#include "zstd.h"
+#include "orderbook_simd_codec.h"
 #include "zdict.h" // For dictionary training
+#include "zstd.h"
+#include "zstd_compressor.h" // Include the concrete compressor
+#include <gtest/gtest.h>
+#include <numeric>
+#include <random>
+#include <vector>
 
-using OkxCodec = cryptodd::OkxObSimdCodecDefault;
+using OkxCodec = cryptodd::OkxObSimdCodec;
 
 // Helper function to generate random snapshot data
 std::vector<float> generate_random_snapshots(size_t num_snapshots) {
@@ -38,7 +38,7 @@ protected:
 
     // Test data
     std::vector<float> original_data;
-    OkxCodec::OkxSnapshot initial_prev_snapshot{};
+    OkxCodec::Snapshot initial_prev_snapshot{};
 };
 
 TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_NoDictionary)
@@ -47,7 +47,7 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_NoDictionary)
     OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>());
 
     // The decoder needs the same starting state to begin reconstruction.
-    OkxCodec::OkxSnapshot decoder_prev_snapshot = initial_prev_snapshot;
+    OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data
     std::vector<uint8_t> encoded_data;
@@ -95,7 +95,7 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_WithDictionary)
     OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>(dictBuffer));
 
     // The decoder needs the same starting state to begin reconstruction.
-    OkxCodec::OkxSnapshot decoder_prev_snapshot = initial_prev_snapshot;
+    OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data
     std::vector<uint8_t> encoded_data;
@@ -130,7 +130,7 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_Float32)
     OkxCodec codec(std::make_unique<cryptodd::ZstdCompressor>());
 
     // The decoder needs the same starting state to begin reconstruction.
-    OkxCodec::OkxSnapshot decoder_prev_snapshot = initial_prev_snapshot;
+    OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data using the float32 pipeline
     std::vector<uint8_t> encoded_data;

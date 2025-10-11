@@ -42,7 +42,7 @@ add_library(cryptodd_arrays STATIC
     src/file_format/blake3_stream_hasher.cpp
     src/data_io/data_reader.cpp
     src/codecs/zstd_compressor.cpp
-    src/codecs/okx_ob_simd_codec.cpp
+    src/codecs/orderbook_simd_codec.cpp
 )
 
 # Enable dynamic dispatch for the library target
@@ -99,7 +99,7 @@ target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays)
 add_executable(cryptodd_arrays_test
         test/lib_simple_tests.cpp
         test/cdd_file_tests.cpp
-        test/codecs/okx_ob_simd_codec_test.cpp)
+        test/codecs/orderbook_simd_codec_test.cpp)
 target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays cryptodd_arrays_shared stduuid)
 
 include(GoogleTest)
@@ -107,7 +107,7 @@ gtest_discover_tests(cryptodd_arrays_test)
 
 # Add a benchmark executable
 add_executable(cryptodd_arrays_benchmark
-        benchmark/codecs/okx_ob_simd_codec_benchmark.cpp
+        benchmark/codecs/orderbook_simd_codec_benchmark.cpp
 )
 target_link_libraries(cryptodd_arrays_benchmark PRIVATE
         benchmark::benchmark

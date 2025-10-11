@@ -7,13 +7,13 @@
 #include <span>
 
 // Bring in the class definition.
-#include "okx_ob_simd_codec.h"
+#include "orderbook_simd_codec.h"
 
 // These headers are needed for the SIMD implementations below
 #include "hwy/aligned_allocator.h"
 
 #undef HWY_TARGET_INCLUDE
-#define HWY_TARGET_INCLUDE "okx_ob_simd_codec.cpp" // This file includes itself
+#define HWY_TARGET_INCLUDE "orderbook_simd_codec.cpp" // This file includes itself
 #include "hwy/foreach_target.h"
 
 // Must come after foreach_target.h to avoid redefinition errors.
@@ -202,7 +202,7 @@ void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT
 // --- ENCODING PIPELINE (FLOAT32) ---
 
 // XOR the bit patterns of two float32 vectors. No demotion needed.
-void XorFloat32(const float* HWY_RESTRICT current, const float* HWY_RESTRICT prev,
+HWY_NOINLINE void XorFloat32(const float* HWY_RESTRICT current, const float* HWY_RESTRICT prev,
                 float* HWY_RESTRICT out, size_t num_floats)
 {
     size_t i = 0;
