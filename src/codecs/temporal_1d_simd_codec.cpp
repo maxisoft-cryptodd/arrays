@@ -185,7 +185,7 @@ HWY_NOINLINE void DemoteAndXor1D(const float* HWY_RESTRICT data, hwy::float16_t*
     if (num_elements == 0) return;
     const hwy::float16_t f16_curr = hwy::ConvertScalarTo<hwy::float16_t>(data[0]);
     const hwy::float16_t f16_prev = hwy::ConvertScalarTo<hwy::float16_t>(prev_element);
-    out[0] = hwy::ConvertScalarTo<hwy::float16_t>(hwy::BitCastScalar<uint16_t>(f16_curr) ^ hwy::BitCastScalar<uint16_t>(f16_prev));
+    out[0] = hwy::BitCastScalar<hwy::float16_t>(static_cast<uint16_t>(hwy::BitCastScalar<uint16_t>(f16_curr) ^ hwy::BitCastScalar<uint16_t>(f16_prev)));
     if (num_elements > 1) {
         DemoteAndXor(data + 1, data, out + 1, num_elements - 1);
     }
@@ -201,12 +201,12 @@ HWY_NOINLINE void UnshuffleAndReconstruct16_1D(const uint8_t* HWY_RESTRICT shuff
     const uint8_t* HWY_RESTRICT in_b0 = shuffled_in;
     const uint8_t* HWY_RESTRICT in_b1 = shuffled_in + total_floats;
 
-    hwy::float16_t prev_f16 = hwy::ConvertScalarTo<hwy::float16_t>(prev_element);
+    uint16_t prev_u16 = hwy::BitCastScalar<uint16_t>(hwy::ConvertScalarTo<hwy::float16_t>(prev_element));
 
     size_t i = 0;
 #if HWY_TARGET != HWY_SCALAR
-    const size_t f32_lanes = hn::Lanes(d32);
     const size_t f16_lanes = hn::Lanes(d16);
+    const size_t f32_lanes = hn::Lanes(d32);
     for (; i + f16_lanes <= num_elements; i += f16_lanes) {
         const hn::Rebind<uint8_t, decltype(d16)> d_u8_rebind;
         const auto v_b0 = hn::LoadU(d_u8_rebind, in_b0 + i);
@@ -222,10 +222,10 @@ HWY_NOINLINE void UnshuffleAndReconstruct16_1D(const uint8_t* HWY_RESTRICT shuff
             v_scan = hn::Xor(v_scan, hn::SlideUpLanes(du16, v_scan, dist));
         }
 
-        const VU16 v_prev_broadcast = hn::Set(du16, hwy::BitCastScalar<uint16_t>(prev_f16));
+        const VU16 v_prev_broadcast = hn::Set(du16, prev_u16);
         VU16 v_recon_u16 = hn::Xor(v_scan, v_prev_broadcast);
 
-        prev_f16 = hwy::BitCastScalar<hwy::float16_t>(hn::ExtractLane(v_recon_u16, f16_lanes - 1));
+        prev_u16 = hn::ExtractLane(v_recon_u16, f16_lanes - 1);
 
         VF16 v_recon_f16 = hn::BitCast(d16, v_recon_u16);
 
@@ -236,11 +236,10 @@ HWY_NOINLINE void UnshuffleAndReconstruct16_1D(const uint8_t* HWY_RESTRICT shuff
     }
 #endif
 
-    uint16_t prev_u16_scalar = hwy::BitCastScalar<uint16_t>(prev_f16);
     for (; i < num_elements; ++i) {
         const uint16_t u16_delta = (static_cast<uint16_t>(in_b1[i]) << 8) | in_b0[i];
-        prev_u16_scalar ^= u16_delta;
-        out[i] = hwy::ConvertScalarTo<float>(hwy::BitCastScalar<hwy::float16_t>(prev_u16_scalar));
+        prev_u16 ^= u16_delta;
+        out[i] = hwy::ConvertScalarTo<float>(hwy::BitCastScalar<hwy::float16_t>(prev_u16));
     }
 
     if (num_elements > 0) {
