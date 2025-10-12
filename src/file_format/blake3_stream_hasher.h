@@ -1,10 +1,10 @@
 #pragma once
 
 #include <array>
-#include <blake3.h>
 #include <span>
 #include <stdexcept>
 #include <vector>
+#include <memory>
 
 namespace cryptodd {
 
@@ -14,56 +14,56 @@ using blake3_hash128_t = std::array<uint64_t, 2>;
  * @brief A stateful C++ wrapper for the blake3 streaming hash API.
  */
 class Blake3StreamHasher {
-private:
-    blake3_hasher hasher_{};
-    bool is_initialized_ = false;
-
 public:
-    Blake3StreamHasher() = default;
+    Blake3StreamHasher();
+    ~Blake3StreamHasher();
+    Blake3StreamHasher(Blake3StreamHasher&&) noexcept;
+    Blake3StreamHasher& operator=(Blake3StreamHasher&&) noexcept;
 
-    // Initializes or re-initializes the hasher state.
-    void init() {
-        blake3_hasher_init(&hasher_);
-        is_initialized_ = true;
-    }
+    // Resets the hasher to its initial state, allowing it to be reused.
+    void reset();
 
     // Updates the hash state with new data.
     template<typename T>
     void update(std::span<const T> data) {
-        if (!is_initialized_) {
-            init();
-        }
-        blake3_hasher_update(&hasher_, data.data(), data.size_bytes());
+        update_bytes({reinterpret_cast<const std::byte*>(data.data()), data.size_bytes()});
     }
 
     /**
      * @brief Finalizes the hash and returns a byte array of a specified length.
      * @tparam N The desired output length in bytes.
-     * @return A std::array<uint8_t, N> containing the hash.
+     * @return A std::array<std::byte, N> containing the hash.
      */
     template<size_t N>
-    [[nodiscard]] std::array<uint8_t, N> finalize() const {
-        if (!is_initialized_) {
-            throw std::logic_error("Hasher has not been initialized before finalizing.");
-        }
-        std::array<uint8_t, N> hash_bytes{};
-        blake3_hasher_finalize(&hasher_, hash_bytes.data(), N);
+    [[nodiscard]] std::array<std::byte, N> finalize() const {
+        std::array<std::byte, N> hash_bytes{};
+        finalize_to_span(hash_bytes);
         return hash_bytes;
     }
+
+    /**
+     * @brief Finalizes the hash and returns a byte vector of a specified length.
+     * @param out_len The desired output length in bytes.
+     * @return A std::vector<std::byte> containing the hash.
+     */
+    [[nodiscard]] std::vector<std::byte> finalize(size_t out_len) const;
 
     /**
      * @brief Finalizes the hash and returns a 128-bit (16-byte) hash.
      * @return A blake3_hash128_t containing the hash.
      */
-    [[nodiscard]] blake3_hash128_t finalize_128() const
-    {
-        if (!is_initialized_) {
-            throw std::logic_error("Hasher has not been initialized before finalizing.");
-        }
-        blake3_hash128_t hash_u64{};
-        blake3_hasher_finalize(&hasher_, reinterpret_cast<uint8_t*>(&hash_u64), sizeof(hash_u64));
-        return hash_u64;
-    }
+    [[nodiscard]] blake3_hash128_t finalize_128() const;
+
+    void update_bytes(std::span<const std::byte> data);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_;
+
+    // Initializes or re-initializes the hasher state.
+    void init();
+
+    void finalize_to_span(std::span<std::byte> out) const;
 };
 
 template<typename T>
