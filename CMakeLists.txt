@@ -37,7 +37,7 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 include(GenerateExportHeader)
 
-add_library(cryptodd_arrays STATIC
+add_library(cryptodd_arrays_lib STATIC
     src/data_io/data_writer.cpp
     src/file_format/blake3_stream_hasher.cpp
     src/data_io/data_reader.cpp
@@ -45,22 +45,32 @@ add_library(cryptodd_arrays STATIC
     src/codecs/orderbook_simd_codec.cpp
     src/codecs/temporal_1d_simd_codec.cpp
     src/codecs/temporal_2d_simd_codec.cpp
+        src/data_io/data_extractor.cpp
+        src/data_io/data_extractor.h
+        src/file_format/cdd_file_format.cpp
+        src/storage/file_backend.cpp
+        src/storage/memory_backend.cpp
+        src/data_io/buffer.cpp
 )
 
+set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
+
 # Enable dynamic dispatch for the library target
-target_compile_definitions(cryptodd_arrays PRIVATE HWY_EXPORT_AND_DYNAMIC_DISPATCH)
+target_compile_definitions(cryptodd_arrays_lib PRIVATE HWY_EXPORT_AND_DYNAMIC_DISPATCH)
 
 add_library(cryptodd_arrays_shared SHARED
         library.cpp
 )
 
-target_link_libraries(cryptodd_arrays_shared PRIVATE cryptodd_arrays)
+set_target_properties(cryptodd_arrays_shared PROPERTIES OUTPUT_NAME "cryptodd_arrays")
+
+target_link_libraries(cryptodd_arrays_shared PRIVATE cryptodd_arrays_lib)
 
 # This creates cryptodd_arrays_export.h and defines CRYPTODD_ARRAYS_API
 GENERATE_EXPORT_HEADER(cryptodd_arrays_shared)
 
 # Add the binary directory to the include path. This is where the export header is generated.
-target_include_directories(cryptodd_arrays PUBLIC
+target_include_directories(cryptodd_arrays_lib PUBLIC
     "${CMAKE_BINARY_DIR}"
     "${CMAKE_SOURCE_DIR}/src/storage"
     "${CMAKE_SOURCE_DIR}/src/file_format"
@@ -70,7 +80,7 @@ target_include_directories(cryptodd_arrays PUBLIC
 
 target_include_directories(cryptodd_arrays_shared PUBLIC
         "${CMAKE_BINARY_DIR}"
-        cryptodd_arrays
+        cryptodd_arrays_lib
 )
 
 add_executable(cryptodd_arrays_exe main.cpp)
@@ -85,8 +95,11 @@ find_package(hwy CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 
+find_package(Python COMPONENTS Interpreter Development.Module)
+find_package(pybind11 CONFIG REQUIRED)
+
 # Make the library's dependencies public
-target_link_libraries(cryptodd_arrays PUBLIC
+target_link_libraries(cryptodd_arrays_lib PUBLIC
         zstd::libzstd
         lz4::lz4
         BLAKE3::blake3
@@ -95,7 +108,7 @@ target_link_libraries(cryptodd_arrays PUBLIC
 )
 
 # Link the executable to the library
-target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays)
+target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays_lib)
 
 # Add a test executable
 add_executable(cryptodd_arrays_test
@@ -104,7 +117,7 @@ add_executable(cryptodd_arrays_test
         test/codecs/orderbook_simd_codec_test.cpp
         test/codecs/temporal_1d_simd_codec_test.cpp
         test/codecs/temporal_2d_simd_codec_test.cpp)
-target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays cryptodd_arrays_shared stduuid)
+target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
 
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)
@@ -118,7 +131,7 @@ add_executable(orderbook_simd_benchmark
 
 target_link_libraries(orderbook_simd_benchmark PRIVATE
         benchmark::benchmark
-        cryptodd_arrays
+        cryptodd_arrays_lib
 )
 
 # Add a benchmark executable for the new 1D codec
@@ -127,7 +140,7 @@ add_executable(temporal_1d_simd_benchmark
 )
 target_link_libraries(temporal_1d_simd_benchmark PRIVATE
         benchmark::benchmark
-        cryptodd_arrays
+        cryptodd_arrays_lib
 )
 
 # Add a benchmark executable for the new 2D codec
@@ -136,5 +149,18 @@ add_executable(temporal_2d_simd_benchmark
 )
 target_link_libraries(temporal_2d_simd_benchmark PRIVATE
         benchmark::benchmark
-        cryptodd_arrays
+        cryptodd_arrays_lib
 )
+
+pybind11_add_module(cryptodd_arrays_py src/python/cryptodd_arrays_py.cpp)
+target_compile_definitions(cryptodd_arrays_py PRIVATE
+        MODULE_NAME="cryptodd_arrays_cpp"
+        VERSION_INFO="0.0.1"
+)
+set_target_properties(cryptodd_arrays_py PROPERTIES OUTPUT_NAME "cryptodd_arrays_cpp")
+target_link_libraries(cryptodd_arrays_py PRIVATE pybind11::pybind11 cryptodd_arrays_lib)
+
+IF(DEFINED PY_BUILD_CMAKE_IMPORT_NAME)
+install(TARGETS cryptodd_arrays_py
+        DESTINATION ${PY_BUILD_CMAKE_IMPORT_NAME})
+ENDIF()
