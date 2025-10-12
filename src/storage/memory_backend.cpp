@@ -55,7 +55,7 @@ std::expected<void, std::string> MemoryBackend::rewind() {
     return {};
 }
 
-std::expected<uint64_t, std::string> MemoryBackend::size() const {
+std::expected<uint64_t, std::string> MemoryBackend::size() {
     return buffer_.size();
 }
 

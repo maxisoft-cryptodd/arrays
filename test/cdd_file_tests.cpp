@@ -1,52 +1,15 @@
-// Prevent problematic windows.h macros on Windows
-#ifdef _WIN32
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
-#endif
-
 #include <gtest/gtest.h>
 #include "../src/file_format/cdd_file_format.h"
 #include "../src/data_io/data_writer.h"
 #include "../src/data_io/data_reader.h"
 #include <filesystem>
-#include <random>
 // Include the single-header UUID library for unique filenames
-#include <stduuid/uuid.h>
 #include "../src/codecs/zstd_compressor.h"
 #include "../src/storage/memory_backend.h"
+#include "test_helpers.h"
 
 namespace fs = std::filesystem;
 using namespace cryptodd;
-
-// Helper to generate random data
-std::vector<std::byte> generate_random_data(size_t size) {
-    // Use a static generator for better performance and to avoid re-seeding on every call.
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
-    static std::uniform_int_distribution<> distrib(0, 255);
-
-    std::vector<std::byte> data(size);
-    std::ranges::generate(data, []() {
-        return static_cast<std::byte>(distrib(gen));
-    });
-    return data;
-}
-
-// Helper to create a unique temporary filepath for tests.
-fs::path generate_unique_test_filepath() {
-    // Generate a truly unique filename using a UUID to prevent test collisions.
-    // This is robust even for parallel test execution.
-    std::random_device rd;
-    auto seed_data = std::array<int, std::mt19937::state_size>{};
-    std::ranges::generate(seed_data, std::ref(rd));
-    std::seed_seq seq(std::begin(seed_data), std::end(seed_data));
-    std::mt19937 generator(seq);
-    uuids::uuid_random_generator gen{generator};
-
-    const uuids::uuid id = gen();
-    const std::string filename = "cryptodd_test_" + uuids::to_string(id) + ".cdd";
-    return fs::temp_directory_path() / filename;
-}
 
 // Custom predicate assertion for verifying user metadata.
 // This encapsulates the decompression logic and provides a clear failure message.

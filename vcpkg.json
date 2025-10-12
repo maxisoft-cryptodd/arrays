@@ -5,17 +5,24 @@
     "blake3",
     "gtest",
     "stduuid",
+    "benchmark",
+    "mio",
     {
       "name": "highway",
-      "features": [ "contrib" ]
+      "features": [
+        "contrib"
+      ]
     },
-    "benchmark",
     {
       "name": "pybind11",
       "default-features": false
     }
   ],
   "vcpkg-configuration": {
-    "overlay-ports": ["./.vcpkg-overlay-ports/python3-empty"]
-  }
+    "overlay-ports": [
+      "./.vcpkg-overlay-ports/python3-empty"
+    ]
+  },
+  "version": "0.0.1",
+  "name": "cryptodd-arrays"
 }
