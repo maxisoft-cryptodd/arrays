@@ -1,286 +1,312 @@
 #include "data_writer.h"
 
-#include "data_reader.h"
+#include "../file_format/serialization_helpers.h"
+#include "../storage/file_backend.h"
+#include "../storage/memory_backend.h"
 
-#include <filesystem> // For std::filesystem::exists
-#include <span>
+#include <format>
+#include <memory> // For std::make_unique
 
 namespace cryptodd {
-    
-// Helper to compress data using Zstd
-std::vector<uint8_t> DataWriter::compress_zstd(std::span<const uint8_t> input) {
-    if (input.empty()) {
-        return {};
-    }
-    size_t const cBuffSize = ZSTD_compressBound(input.size());
-    std::vector<uint8_t> compressed_data(cBuffSize);
-    size_t const compressed_size = ZSTD_compress(compressed_data.data(), cBuffSize, input.data(), input.size(), 1); // Compression level 1
-    if (ZSTD_isError(compressed_size)) {
-        throw std::runtime_error("Zstd compression failed: " + std::string(ZSTD_getErrorName(compressed_size)));
-    }
-    compressed_data.resize(compressed_size);
-    return compressed_data;
+
+ZstdCompressor& DataWriter::get_zstd_compressor() const {
+    std::call_once(zstd_init_flag_, [this]() { zstd_compressor_.emplace(); });
+    return *zstd_compressor_;
 }
 
-void DataWriter::write_new_chunk_offsets_block(uint64_t previous_block_offset) {
-    // Create a new ChunkOffsetsBlock
+std::expected<void, std::string> DataWriter::write_new_chunk_offsets_block(uint64_t previous_block_offset) {
     ChunkOffsetsBlock new_block;
-    new_block.type = ChunkOffsetType::RAW; // For now, always raw
-    new_block.offsets_and_pointer.resize(chunk_offsets_block_capacity_ + 1, 0); // +1 for the next_index_offset pointer
+    new_block.set_type(ChunkOffsetType::RAW);
+    new_block.set_offsets_and_pointer(std::vector<uint64_t>(chunk_offsets_block_capacity_ + 1, 0));
 
-    // Record the start position of this new block
-    uint64_t new_block_start_pos = backend_->tell();
-    current_chunk_offset_block_start_ = new_block_start_pos;
+    auto tell_res = backend_->tell();
+    if (!tell_res) return std::unexpected(tell_res.error());
+    current_chunk_offset_block_start_ = *tell_res;
 
-    // We hash the contents as they are written (all zeros initially).
     Blake3StreamHasher initial_hasher;
-    initial_hasher.update(std::span<const uint64_t>(new_block.offsets_and_pointer));
-    new_block.hash = initial_hasher.finalize_128();
+    initial_hasher.update(std::span(new_block.offsets_and_pointer()));
+    new_block.set_hash(initial_hasher.finalize_128());
 
-    // Calculate the actual size of the block.
-    new_block.size = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash128_t) +
-                     sizeof(uint32_t) + // for the vector's size prefix
-                     (new_block.offsets_and_pointer.size() * sizeof(uint64_t));
+    new_block.set_size(sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash128_t) +
+                       sizeof(uint32_t) +
+                       (new_block.offsets_and_pointer().size() * sizeof(uint64_t)));
 
-    // Write the entire block to the backend.
-    new_block.write(*backend_);
+    if (auto res = new_block.write(*backend_); !res) {
+        return std::unexpected(res.error());
+    }
 
-    chunk_offset_blocks_.push_back(new_block);
+    chunk_offset_blocks_.push_back(std::move(new_block));
     current_chunk_offset_block_index_ = 0;
 
-    // Update the previous block's next_index_offset if applicable
     if (previous_block_offset != 0) {
-        update_previous_chunk_offsets_block_pointer(previous_block_offset, new_block_start_pos);
+        return update_previous_chunk_offsets_block_pointer(previous_block_offset, current_chunk_offset_block_start_);
     }
+    return {};
 }
 
-void DataWriter::update_previous_chunk_offsets_block_pointer(uint64_t previous_block_offset, uint64_t new_block_offset) {
-    // Store current position to restore it later
-    const uint64_t original_pos = backend_->tell();
+std::expected<void, std::string> DataWriter::update_previous_chunk_offsets_block_pointer(uint64_t previous_block_offset,
+                                                                                         uint64_t new_block_offset) {
+    auto tell_res = backend_->tell();
+    if (!tell_res) return std::unexpected(tell_res.error());
+    const uint64_t original_pos = *tell_res;
 
     if (chunk_offset_blocks_.size() < 2) {
-        throw std::runtime_error("Attempted to update previous block pointer when no previous block exists.");
+        return std::unexpected("Attempted to update previous block pointer when no previous block exists.");
     }
-    
-    // 1. Update the in-memory representation of the previous block.
+
     ChunkOffsetsBlock& prev_block = chunk_offset_blocks_[chunk_offset_blocks_.size() - 2];
     prev_block.set_next_index_offset(new_block_offset);
 
-    // 2. RECALCULATE and update the hash for the previous block.
     Blake3StreamHasher recalculator;
-    recalculator.update(std::span<const uint64_t>(prev_block.offsets_and_pointer));
-    prev_block.hash = recalculator.finalize_128();
+    recalculator.update(std::span(prev_block.offsets_and_pointer()));
+    prev_block.set_hash(recalculator.finalize_128());
 
-    // 3. Update the hash on disk.
     const uint64_t hash_offset_in_block = previous_block_offset + sizeof(uint32_t) + sizeof(uint16_t);
-    write_pod_at(*backend_, hash_offset_in_block, prev_block.hash);
+    if (auto res = serialization::write_pod_at(*backend_, hash_offset_in_block, prev_block.hash()); !res) {
+        return std::unexpected(res.error());
+    }
 
-    // 4. Update the pointer on disk.
-    const uint64_t pointer_offset = previous_block_offset + prev_block.size - sizeof(uint64_t);
-    write_pod_at(*backend_, pointer_offset, new_block_offset);
-    
-    // Restore original position
-    backend_->seek(original_pos);
+    const uint64_t pointer_offset = previous_block_offset + prev_block.size() - sizeof(uint64_t);
+    if (auto res = serialization::write_pod_at(*backend_, pointer_offset, new_block_offset); !res) {
+        return std::unexpected(res.error());
+    }
+
+    return backend_->seek(original_pos);
 }
 
-DataWriter DataWriter::create_new(const std::filesystem::path& filepath, size_t chunk_offsets_block_capacity,
-                                  std::span<const uint8_t> user_metadata) {
-    // Precondition check: Ensure the file does not exist before trying to create it.
+std::expected<std::unique_ptr<DataWriter>, std::string> DataWriter::create_new(const std::filesystem::path& filepath,
+                                                                              size_t chunk_offsets_block_capacity,
+                                                                              std::span<const std::byte> user_metadata) {
     if (std::filesystem::exists(filepath)) {
-        throw std::runtime_error("File already exists: " + filepath.string() + ". Use open_for_append for existing files.");
+        return std::unexpected("File already exists: " + filepath.string() + ". Use open_for_append for existing files.");
     }
-    return DataWriter(filepath, chunk_offsets_block_capacity, user_metadata);
+    try {
+        auto backend = std::make_unique<storage::FileBackend>(filepath, std::ios_base::out | std::ios_base::binary |
+                                                                            std::ios_base::trunc);
+        return std::make_unique<DataWriter>(Create{}, std::move(backend), chunk_offsets_block_capacity, user_metadata);
+    } catch (const std::exception& e) {
+        return std::unexpected(std::format("Failed to create new file '{}': {}", filepath.string(), e.what()));
+    }
 }
 
-DataWriter DataWriter::open_for_append(const std::filesystem::path& filepath) {
-    // Precondition check: Ensure the file exists before trying to open it for appending.
+std::expected<std::unique_ptr<DataWriter>, std::string> DataWriter::open_for_append(const std::filesystem::path& filepath) {
     if (!std::filesystem::exists(filepath)) {
-        throw std::runtime_error("File does not exist: " + filepath.string() + ". Use create_new for new files.");
+        return std::unexpected("File does not exist: " + filepath.string() + ". Use create_new for new files.");
     }
-    return DataWriter(filepath, for_append);
-}
-
-DataWriter DataWriter::create_in_memory(size_t chunk_offsets_block_capacity, std::span<const uint8_t> user_metadata) {
-    auto backend = std::make_unique<MemoryBackend>();
-    return DataWriter(std::move(backend), chunk_offsets_block_capacity, user_metadata);
-}
-
-
-DataWriter::DataWriter(const std::filesystem::path& filepath, const size_t chunk_offsets_block_capacity,
-                       const std::span<const uint8_t> user_metadata)
-    : DataWriter(std::make_unique<FileBackend>(filepath, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc), // NOLINT(*-pass-by-value)
-                 chunk_offsets_block_capacity, user_metadata) {
-}
-
-DataWriter::DataWriter(const std::filesystem::path& filepath, for_append_t)
-    : DataWriter(std::make_unique<FileBackend>(filepath, std::ios_base::in | std::ios_base::out | std::ios_base::binary)) {
-}
-
-DataWriter::DataWriter(std::unique_ptr<IStorageBackend> backend, size_t chunk_offsets_block_capacity,
-                       std::span<const uint8_t> user_metadata)
-    : backend_(std::move(backend)), chunk_offsets_block_capacity_(chunk_offsets_block_capacity) { // NOLINT(*-pass-by-value)
-    // Prepare internal metadata
-    InternalMetadata internal_meta{};
-    internal_meta.chunk_offsets_block_capacity = chunk_offsets_block_capacity_;
-    
-    // Serialize internal metadata to a temporary in-memory backend
-    MemoryBackend temp_meta_backend;
-    internal_meta.write(temp_meta_backend);
-    temp_meta_backend.rewind();
-    std::vector<uint8_t> serialized_internal_meta(temp_meta_backend.size());
-    temp_meta_backend.read(serialized_internal_meta);
-
-    // Compress user metadata
-    file_header_.user_metadata = compress_zstd(user_metadata);
-    // Compress internal metadata
-    file_header_.internal_metadata = compress_zstd(serialized_internal_meta);
-
-    file_header_.write(*backend_);
-
-    // Write the first ChunkOffsetsBlock
-    write_new_chunk_offsets_block(0); // No previous block
-}
-
-DataWriter::DataWriter(std::unique_ptr<IStorageBackend> backend) : backend_(std::move(backend)) {
-    // Read FileHeader
-    file_header_.read(*backend_);
-
-    // Decompress and read internal metadata to configure the writer
-    if (file_header_.internal_metadata.empty()) {
-        throw std::runtime_error("Cannot append: internal metadata is missing from the file header.");
+    try {
+        auto backend = std::make_unique<storage::FileBackend>(filepath, std::ios_base::in | std::ios_base::out |
+                                                                            std::ios_base::binary);
+        return std::make_unique<DataWriter>(Create{}, std::move(backend));
+    } catch (const std::exception& e) {
+        return std::unexpected(std::format("Failed to open file for append '{}': {}", filepath.string(), e.what()));
     }
-    size_t decompressed_size = ZSTD_getFrameContentSize(file_header_.internal_metadata.data(), file_header_.internal_metadata.size());
-    if (decompressed_size == ZSTD_CONTENTSIZE_ERROR || decompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
-        throw std::runtime_error("Cannot determine decompressed size of internal metadata.");
-    }
-    std::vector<uint8_t> decompressed_internal_meta = DataReader::decompress_zstd(file_header_.internal_metadata, decompressed_size);
-    MemoryBackend temp_meta_backend;
-    temp_meta_backend.write(decompressed_internal_meta);
-    temp_meta_backend.rewind();
-    InternalMetadata internal_meta{};
-    internal_meta.read(temp_meta_backend);
-    chunk_offsets_block_capacity_ = internal_meta.chunk_offsets_block_capacity;
+}
 
-    // Read all ChunkOffsetsBlocks to build the in-memory index
-    uint64_t header_end_pos = backend_->tell(); // Position after FileHeader
-    uint64_t current_block_file_offset = header_end_pos;
-    while (current_block_file_offset != 0) {
-        backend_->seek(current_block_file_offset);
-        ChunkOffsetsBlock block;
-        block.read(*backend_);
-        chunk_offset_blocks_.push_back(block);
-        
-        // This is needed to correctly set current_chunk_offset_block_start_
-        if (block.get_next_index_offset() == 0) {
-            current_chunk_offset_block_start_ = current_block_file_offset;
+std::expected<std::unique_ptr<DataWriter>, std::string> DataWriter::create_in_memory(size_t chunk_offsets_block_capacity,
+                                                                                    std::span<const std::byte> user_metadata) {
+    try {
+        auto backend = std::make_unique<storage::MemoryBackend>();
+        return std::make_unique<DataWriter>(Create{}, std::move(backend), chunk_offsets_block_capacity, user_metadata);
+    } catch (const std::exception& e) {
+        return std::unexpected(std::format("Failed to create in-memory writer: {}", e.what()));
+    }
+}
+
+DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend, size_t chunk_offsets_block_capacity,
+                       std::span<const std::byte> user_metadata)
+    : backend_(std::move(backend)), chunk_offsets_block_capacity_(chunk_offsets_block_capacity) {
+    auto init = [this, user_metadata]() -> std::expected<void, std::string> {
+        InternalMetadata internal_meta{};
+        internal_meta.chunk_offsets_block_capacity = chunk_offsets_block_capacity_;
+
+        storage::MemoryBackend temp_meta_backend;
+        if (auto res = serialization::write_pod(temp_meta_backend, internal_meta.chunk_offsets_block_capacity); !res) return std::unexpected(res.error());
+        if (auto res = temp_meta_backend.rewind(); !res) return res;
+        auto size_res = temp_meta_backend.size();
+        if (!size_res) return std::unexpected(size_res.error());
+        std::vector<std::byte> serialized_internal_meta(*size_res);
+        if (auto res = temp_meta_backend.read(serialized_internal_meta); !res) return std::unexpected(res.error());
+
+        auto& compressor = get_zstd_compressor();
+        auto user_meta_res = compressor.compress(user_metadata);
+        if (!user_meta_res) return std::unexpected("Failed to compress user metadata: " + user_meta_res.error());
+        file_header_.set_user_metadata(std::move(*user_meta_res));
+
+        auto internal_meta_res = compressor.compress(serialized_internal_meta);
+        if (!internal_meta_res)
+            return std::unexpected("Failed to compress internal metadata: " + internal_meta_res.error());
+        file_header_.set_internal_metadata(std::move(*internal_meta_res));
+
+        if (auto res = file_header_.write(*backend_); !res) return res;
+
+        return write_new_chunk_offsets_block(0);
+    }();
+    if (!init) {
+        throw std::runtime_error("Failed to initialize DataWriter: " + init.error());
+    }
+}
+
+DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend) : backend_(std::move(backend)) {
+    auto init = [this]() -> std::expected<void, std::string> {
+        if (auto res = file_header_.read(*backend_); !res) return res;
+
+        if (file_header_.internal_metadata().empty()) {
+            return std::unexpected("Cannot append: internal metadata is missing from the file header.");
         }
-        current_block_file_offset = block.get_next_index_offset();
-    }
-    if (chunk_offset_blocks_.empty()) {
-        throw std::runtime_error("Existing file has no chunk offset blocks.");
-    }
+        auto decompressed_res = get_zstd_compressor().decompress(file_header_.internal_metadata());
+        if (!decompressed_res) return std::unexpected("Failed to decompress internal metadata: " + decompressed_res.error());
 
-    // Set current_chunk_offset_block_index_ to the first empty slot in the last block
-    current_chunk_offset_block_index_ = 0; // Default to 0
-    bool found_empty_slot = false;
-    for (size_t i = 0; i < chunk_offset_blocks_.back().capacity(); ++i) {
-        if (chunk_offset_blocks_.back().offsets_and_pointer[i] == 0) {
-            current_chunk_offset_block_index_ = i;
-            found_empty_slot = true;
-            break;
+        storage::MemoryBackend temp_meta_backend;
+        if (auto res = temp_meta_backend.write(*decompressed_res); !res) return std::unexpected(res.error());
+        if (auto res = temp_meta_backend.rewind(); !res) return res;
+
+        auto capacity_res = serialization::read_pod<uint64_t>(temp_meta_backend);
+        if (!capacity_res) return std::unexpected("Failed to read chunk offsets block capacity: " + capacity_res.error());
+        chunk_offsets_block_capacity_ = *capacity_res;
+
+        auto tell_res = backend_->tell();
+        if (!tell_res) return std::unexpected(tell_res.error());
+        uint64_t current_block_file_offset = *tell_res;
+
+        while (current_block_file_offset != 0) {
+            if (auto res = backend_->seek(current_block_file_offset); !res) return res;
+            ChunkOffsetsBlock block;
+            if (auto res = block.read(*backend_); !res) return res;
+
+            if (block.get_next_index_offset() == 0) {
+                current_chunk_offset_block_start_ = current_block_file_offset;
+            }
+            current_block_file_offset = block.get_next_index_offset();
+            chunk_offset_blocks_.push_back(std::move(block));
         }
+        if (chunk_offset_blocks_.empty()) {
+            return std::unexpected("Existing file has no chunk offset blocks.");
+        }
+
+        current_chunk_offset_block_index_ = 0;
+        bool found_empty_slot = false;
+        const auto& last_block_offsets = chunk_offset_blocks_.back().offsets_and_pointer();
+        for (size_t i = 0; i < chunk_offset_blocks_.back().capacity(); ++i) {
+            if (last_block_offsets[i] == 0) {
+                current_chunk_offset_block_index_ = i;
+                found_empty_slot = true;
+                break;
+            }
+        }
+        if (!found_empty_slot) {
+            current_chunk_offset_block_index_ = chunk_offsets_block_capacity_;
+        }
+
+        auto size_res = backend_->size();
+        if (!size_res) return std::unexpected(size_res.error());
+        return backend_->seek(*size_res);
+    }();
+    if (!init) {
+        throw std::runtime_error("Failed to open DataWriter for append: " + init.error());
     }
-    if (!found_empty_slot) {
-        current_chunk_offset_block_index_ = chunk_offsets_block_capacity_; // Block is full
-    }
-    
-    // After loading existing blocks, seek to the end of the file to prepare for appending.
-    backend_->seek(backend_->size());
 }
 
-void DataWriter::append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
-                              std::span<const uint32_t> shape, std::span<const uint8_t> data) {
+std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
+                                                          std::span<const uint32_t> shape,
+                                                          std::span<const std::byte> data) {
     if (shape.size() > MAX_SHAPE_DIMENSIONS) {
-        throw std::invalid_argument("Shape has an excessive number of dimensions (> " + std::to_string(MAX_SHAPE_DIMENSIONS) + ").");
+        return std::unexpected("Shape has an excessive number of dimensions.");
     }
+
+    const size_t new_chunk_index = num_chunks();
 
     if (current_chunk_offset_block_index_ >= chunk_offsets_block_capacity_) {
         uint64_t previous_block_offset = current_chunk_offset_block_start_;
-        write_new_chunk_offsets_block(previous_block_offset);
+        if (auto res = write_new_chunk_offsets_block(previous_block_offset); !res) {
+            return std::unexpected(res.error());
+        }
     }
 
-    std::vector<uint8_t> processed_data;
+    std::vector<std::byte> processed_data;
     if (type == ChunkDataType::ZSTD_COMPRESSED) {
-        processed_data = compress_zstd(data);
+        auto compress_res = get_zstd_compressor().compress(data);
+        if (!compress_res) return std::unexpected("Zstd compression failed: " + compress_res.error());
+        processed_data = std::move(*compress_res);
     } else {
         processed_data.assign(data.begin(), data.end());
     }
 
     Chunk chunk;
-    chunk.type = type;
-    chunk.dtype = dtype;
-    chunk.hash = calculate_blake3_hash128(data);
-    chunk.flags = flags;
-    if (shape.empty() || shape.back() != 0) {
-        chunk.shape.reserve(shape.size() + 1);
-        chunk.shape.assign(shape.begin(), shape.end());
-        chunk.shape.push_back(0);
-    } else {
-        chunk.shape.assign(shape.begin(), shape.end());
-    }
-    chunk.data = std::move(processed_data);
+    chunk.set_type(type);
+    chunk.set_dtype(dtype);
+    chunk.set_hash(calculate_blake3_hash128(data));
+    chunk.set_flags(flags);
 
-    size_t calculated_chunk_size_raw = 
-        sizeof(chunk.size) + 
-        sizeof(static_cast<uint16_t>(chunk.type)) + 
-        sizeof(static_cast<uint16_t>(chunk.dtype)) + 
-        sizeof(chunk.hash) + 
-        sizeof(chunk.flags) + 
-        sizeof(uint32_t) + (chunk.shape.size() * sizeof(uint32_t)) +
-        sizeof(uint32_t) + chunk.data.size();
+    std::vector<uint32_t> shape_vec;
+    if (shape.empty() || shape.back() != 0) {
+        shape_vec.reserve(shape.size() + 1);
+        shape_vec.assign(shape.begin(), shape.end());
+        shape_vec.push_back(0);
+    } else {
+        shape_vec.assign(shape.begin(), shape.end());
+    }
+    chunk.set_shape(std::move(shape_vec));
+    chunk.set_data(std::move(processed_data));
+
+    size_t calculated_chunk_size_raw =
+        sizeof(uint32_t) + // size
+        sizeof(uint16_t) + // type
+        sizeof(uint16_t) + // dtype
+        sizeof(blake3_hash128_t) + // hash
+        sizeof(uint64_t) + // flags
+        sizeof(uint32_t) + (chunk.shape().size() * sizeof(uint32_t)) + // shape
+        sizeof(uint32_t) + chunk.data().size(); // data
 
     if (calculated_chunk_size_raw > std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("Calculated chunk size exceeds maximum for uint32_t.");
+        return std::unexpected("Calculated chunk size exceeds maximum for uint32_t.");
     }
-    chunk.size = static_cast<uint32_t>(calculated_chunk_size_raw);
+    chunk.set_size(static_cast<uint32_t>(calculated_chunk_size_raw));
 
-    uint64_t chunk_start_offset = backend_->tell();
-    chunk.write(*backend_);
+    auto tell_res = backend_->tell();
+    if (!tell_res) return std::unexpected(tell_res.error());
+    uint64_t chunk_start_offset = *tell_res;
 
-    // FIX 1: Save the file position after writing the chunk.
-    const uint64_t end_of_chunk_pos = backend_->tell();
+    if (auto res = chunk.write(*backend_); !res) return std::unexpected(res.error());
 
-    // --- Update the ChunkOffsetsBlock on disk ---
+    auto end_tell_res = backend_->tell();
+    if (!end_tell_res) return std::unexpected(end_tell_res.error());
+    const uint64_t end_of_chunk_pos = *end_tell_res;
+
     auto& current_block = chunk_offset_blocks_.back();
+    auto offsets = current_block.offsets_and_pointer();
+    offsets[current_chunk_offset_block_index_] = chunk_start_offset;
+    current_block.set_offsets_and_pointer(std::move(offsets));
 
-    current_block.offsets_and_pointer[current_chunk_offset_block_index_] = chunk_start_offset;
-    
-    // FIX 2: Re-calculate the hash of the ENTIRE updated offsets block.
     Blake3StreamHasher recalculator;
-    recalculator.update(std::span<const uint64_t>(current_block.offsets_and_pointer));
-    current_block.hash = recalculator.finalize_128();
+    recalculator.update(std::span(current_block.offsets_and_pointer()));
+    current_block.set_hash(recalculator.finalize_128());
 
-    // Perform two small, targeted writes to update the disk.
-    // a) Write the new chunk offset to its slot.
-    const uint64_t offset_in_block = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash128_t) + sizeof(uint32_t) + (current_chunk_offset_block_index_ * sizeof(uint64_t));
-    write_pod_at(*backend_, current_chunk_offset_block_start_ + offset_in_block, chunk_start_offset);
-    
-    // b) Write the new hash to the block's header.
+    const uint64_t offset_in_block = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash128_t) +
+                                     sizeof(uint32_t) + (current_chunk_offset_block_index_ * sizeof(uint64_t));
+    if (auto res = serialization::write_pod_at(*backend_, current_chunk_offset_block_start_ + offset_in_block,
+                                                 chunk_start_offset); !res)
+        return std::unexpected(res.error());
+
     const uint64_t hash_offset_in_block = sizeof(uint32_t) + sizeof(uint16_t);
-    write_pod_at(*backend_, current_chunk_offset_block_start_ + hash_offset_in_block, current_block.hash);
+    if (auto res = serialization::write_pod_at(*backend_, current_chunk_offset_block_start_ + hash_offset_in_block,
+                                                 current_block.hash()); !res)
+        return std::unexpected(res.error());
 
-    // FIX 1 (cont.): Restore the file pointer to the end of the chunk.
-    backend_->seek(end_of_chunk_pos);
+    if (auto res = backend_->seek(end_of_chunk_pos); !res) return std::unexpected(res.error());
 
     current_chunk_offset_block_index_++;
+    return new_chunk_index;
 }
 
-void DataWriter::flush() {
-    backend_->flush();
+std::expected<void, std::string> DataWriter::flush() {
+    return backend_->flush();
 }
 
-std::unique_ptr<IStorageBackend> DataWriter::release_backend() {
-    flush(); // Ensure everything is written before releasing.
+std::expected<std::unique_ptr<storage::IStorageBackend>, std::string> DataWriter::release_backend() {
+    if (auto res = flush(); !res) {
+        backend_.reset();
+        return std::unexpected(res.error());
+    }
     return std::move(backend_);
 }
 

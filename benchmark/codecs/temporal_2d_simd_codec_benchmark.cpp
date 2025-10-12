@@ -58,19 +58,33 @@ protected:
 // --- Float16 Benchmarks ---
 BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Encode16)(benchmark::State& state) {
     for (auto _ : state) {
-        std::vector<uint8_t> encoded = codec_->encode16(original_float_data, initial_prev_row_float, workspace_);
-        benchmark::DoNotOptimize(encoded);
+        auto result = codec_->encode16(original_float_data, initial_prev_row_float, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_float_data.size() * sizeof(float));
 }
 
 BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Decode16)(benchmark::State& state) {
     const size_t num_rows = state.range(0);
-    std::vector<uint8_t> encoded = codec_->encode16(original_float_data, initial_prev_row_float, workspace_);
+    auto encode_result = codec_->encode16(original_float_data, initial_prev_row_float, workspace_);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded = std::move(*encode_result);
+
     for (auto _ : state) {
         auto decoder_prev_row = initial_prev_row_float;
-        std::vector<float> decoded = codec_->decode16(encoded, num_rows, decoder_prev_row);
-        benchmark::DoNotOptimize(decoded);
+        auto result = codec_->decode16(encoded, num_rows, decoder_prev_row);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_float_data.size() * sizeof(float));
 }
@@ -78,19 +92,33 @@ BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Decode16)(benchmark::State& sta
 // --- Float32 Benchmarks ---
 BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Encode32)(benchmark::State& state) {
     for (auto _ : state) {
-        std::vector<uint8_t> encoded = codec_->encode32(original_float_data, initial_prev_row_float, workspace_);
-        benchmark::DoNotOptimize(encoded);
+        auto result = codec_->encode32(original_float_data, initial_prev_row_float, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_float_data.size() * sizeof(float));
 }
 
 BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Decode32)(benchmark::State& state) {
     const size_t num_rows = state.range(0);
-    std::vector<uint8_t> encoded = codec_->encode32(original_float_data, initial_prev_row_float, workspace_);
+    auto encode_result = codec_->encode32(original_float_data, initial_prev_row_float, workspace_);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded = std::move(*encode_result);
+
     for (auto _ : state) {
         auto decoder_prev_row = initial_prev_row_float;
-        std::vector<float> decoded = codec_->decode32(encoded, num_rows, decoder_prev_row);
-        benchmark::DoNotOptimize(decoded);
+        auto result = codec_->decode32(encoded, num_rows, decoder_prev_row);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_float_data.size() * sizeof(float));
 }
@@ -98,19 +126,33 @@ BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Decode32)(benchmark::State& sta
 // --- Int64 Benchmarks ---
 BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Encode64)(benchmark::State& state) {
     for (auto _ : state) {
-        std::vector<uint8_t> encoded = codec_->encode64(original_int64_data, initial_prev_row_int64, workspace_);
-        benchmark::DoNotOptimize(encoded);
+        auto result = codec_->encode64(original_int64_data, initial_prev_row_int64, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_int64_data.size() * sizeof(int64_t));
 }
 
 BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Decode64)(benchmark::State& state) {
     const size_t num_rows = state.range(0);
-    std::vector<uint8_t> encoded = codec_->encode64(original_int64_data, initial_prev_row_int64, workspace_);
+    auto encode_result = codec_->encode64(original_int64_data, initial_prev_row_int64, workspace_);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded = std::move(*encode_result);
+
     for (auto _ : state) {
         auto decoder_prev_row = initial_prev_row_int64;
-        std::vector<int64_t> decoded = codec_->decode64(encoded, num_rows, decoder_prev_row);
-        benchmark::DoNotOptimize(decoded);
+        auto result = codec_->decode64(encoded, num_rows, decoder_prev_row);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_int64_data.size() * sizeof(int64_t));
 }

@@ -54,19 +54,33 @@ protected:
 // --- Float16 Benchmarks ---
 BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Encode16_Xor_Shuffle)(benchmark::State& state) {
     for (auto _ : state) {
-        std::vector<uint8_t> encoded = codec_->encode16_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace_);
-        benchmark::DoNotOptimize(encoded);
+        auto result = codec_->encode16_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_float_data.size() * sizeof(float));
 }
 
 BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Decode16_Xor_Shuffle)(benchmark::State& state) {
     const size_t num_elements = state.range(0);
-    std::vector<uint8_t> encoded = codec_->encode16_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace_);
+    auto encode_result = codec_->encode16_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace_);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded = std::move(*encode_result);
+
     for (auto _ : state) {
         float decoder_prev_element = initial_prev_element_float;
-        std::vector<float> decoded = codec_->decode16_Xor_Shuffle(encoded, num_elements, decoder_prev_element);
-        benchmark::DoNotOptimize(decoded);
+        auto result = codec_->decode16_Xor_Shuffle(encoded, num_elements, decoder_prev_element);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_float_data.size() * sizeof(float));
 }
@@ -74,19 +88,33 @@ BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Decode16_Xor_Shuffle)(benchmark
 // --- Float32 Benchmarks ---
 BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Encode32_Xor_Shuffle)(benchmark::State& state) {
     for (auto _ : state) {
-        std::vector<uint8_t> encoded = codec_->encode32_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace_);
-        benchmark::DoNotOptimize(encoded);
+        auto result = codec_->encode32_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_float_data.size() * sizeof(float));
 }
 
 BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Decode32_Xor_Shuffle)(benchmark::State& state) {
     const size_t num_elements = state.range(0);
-    std::vector<uint8_t> encoded = codec_->encode32_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace_);
+    auto encode_result = codec_->encode32_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace_);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded = std::move(*encode_result);
+
     for (auto _ : state) {
         float decoder_prev_element = initial_prev_element_float;
-        std::vector<float> decoded = codec_->decode32_Xor_Shuffle(encoded, num_elements, decoder_prev_element);
-        benchmark::DoNotOptimize(decoded);
+        auto result = codec_->decode32_Xor_Shuffle(encoded, num_elements, decoder_prev_element);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_float_data.size() * sizeof(float));
 }
@@ -94,38 +122,66 @@ BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Decode32_Xor_Shuffle)(benchmark
 // --- Int64 Benchmarks ---
 BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Encode64_Xor)(benchmark::State& state) {
     for (auto _ : state) {
-        std::vector<uint8_t> encoded = codec_->encode64_Xor(original_int64_data, initial_prev_element_int64, workspace_);
-        benchmark::DoNotOptimize(encoded);
+        auto result = codec_->encode64_Xor(original_int64_data, initial_prev_element_int64, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_int64_data.size() * sizeof(int64_t));
 }
 
 BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Decode64_Xor)(benchmark::State& state) {
     const size_t num_elements = state.range(0);
-    std::vector<uint8_t> encoded = codec_->encode64_Xor(original_int64_data, initial_prev_element_int64, workspace_);
+    auto encode_result = codec_->encode64_Xor(original_int64_data, initial_prev_element_int64, workspace_);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded = std::move(*encode_result);
+
     for (auto _ : state) {
         int64_t decoder_prev_element = initial_prev_element_int64;
-        std::vector<int64_t> decoded = codec_->decode64_Xor(encoded, num_elements, decoder_prev_element);
-        benchmark::DoNotOptimize(decoded);
+        auto result = codec_->decode64_Xor(encoded, num_elements, decoder_prev_element);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_int64_data.size() * sizeof(int64_t));
 }
 
 BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Encode64_Delta)(benchmark::State& state) {
     for (auto _ : state) {
-        std::vector<uint8_t> encoded = codec_->encode64_Delta(original_int64_data, initial_prev_element_int64, workspace_);
-        benchmark::DoNotOptimize(encoded);
+        auto result = codec_->encode64_Delta(original_int64_data, initial_prev_element_int64, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_int64_data.size() * sizeof(int64_t));
 }
 
 BENCHMARK_DEFINE_F(Temporal1dSimdCodecBenchmark, Decode64_Delta)(benchmark::State& state) {
     const size_t num_elements = state.range(0);
-    std::vector<uint8_t> encoded = codec_->encode64_Delta(original_int64_data, initial_prev_element_int64, workspace_);
+    auto encode_result = codec_->encode64_Delta(original_int64_data, initial_prev_element_int64, workspace_);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded = std::move(*encode_result);
+
     for (auto _ : state) {
         int64_t decoder_prev_element = initial_prev_element_int64;
-        std::vector<int64_t> decoded = codec_->decode64_Delta(encoded, num_elements, decoder_prev_element);
-        benchmark::DoNotOptimize(decoded);
+        auto result = codec_->decode64_Delta(encoded, num_elements, decoder_prev_element);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_int64_data.size() * sizeof(int64_t));
 }

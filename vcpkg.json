@@ -9,6 +9,13 @@
       "name": "highway",
       "features": [ "contrib" ]
     },
-    "benchmark"
-  ]
+    "benchmark",
+    {
+      "name": "pybind11",
+      "default-features": false
+    }
+  ],
+  "vcpkg-configuration": {
+    "overlay-ports": ["./.vcpkg-overlay-ports/python3-empty"]
+  }
 }

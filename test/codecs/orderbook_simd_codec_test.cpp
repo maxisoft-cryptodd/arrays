@@ -50,13 +50,15 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_NoDictionary)
     OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data
-    std::vector<uint8_t> encoded_data;
-    ASSERT_NO_THROW(encoded_data = codec.encode16(original_data, initial_prev_snapshot, workspace));
+    auto encoded_result = codec.encode16(original_data, initial_prev_snapshot, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // 3. Decode the data
-    std::vector<float> decoded_data;
-    ASSERT_NO_THROW(decoded_data = codec.decode16(encoded_data, num_snapshots, decoder_prev_snapshot));
+    auto decoded_result = codec.decode16(encoded_data, num_snapshots, decoder_prev_snapshot);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // 4. Verify the decoded data
     ASSERT_EQ(decoded_data.size(), original_data.size());
@@ -78,7 +80,7 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_NoDictionary)
 
 TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_WithDictionary)
 {
-    auto dictBuffer = std::vector<uint8_t>(original_data.size() * sizeof(float) / 15);
+    auto dictBuffer = std::vector<std::byte>(original_data.size() * sizeof(float) / 15);
     ASSERT_GT(dictBuffer.size(), 8);
     auto sampleSizes = std::vector<size_t>();
     sampleSizes.assign(original_data.size() / OkxCodec::SnapshotFloats, OkxCodec::SnapshotFloats * sizeof(float));
@@ -98,13 +100,15 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_WithDictionary)
     OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data
-    std::vector<uint8_t> encoded_data;
-    ASSERT_NO_THROW(encoded_data = codec.encode16(original_data, initial_prev_snapshot, workspace));
+    auto encoded_result = codec.encode16(original_data, initial_prev_snapshot, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // 3. Decode the data
-    std::vector<float> decoded_data;
-    ASSERT_NO_THROW(decoded_data = codec.decode16(encoded_data, num_snapshots, decoder_prev_snapshot));
+    auto decoded_result = codec.decode16(encoded_data, num_snapshots, decoder_prev_snapshot);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // 4. Verify the decoded data
     ASSERT_EQ(decoded_data.size(), original_data.size());
@@ -134,13 +138,15 @@ std::make_unique<cryptodd::ZstdCompressor>());    cryptodd::OrderbookSimdCodecWo
     OkxCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
 
     // 2. Encode the data using the float32 pipeline
-    std::vector<uint8_t> encoded_data;
-    ASSERT_NO_THROW(encoded_data = codec.encode32(original_data, initial_prev_snapshot, workspace));
+    auto encoded_result = codec.encode32(original_data, initial_prev_snapshot, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // 3. Decode the data
-    std::vector<float> decoded_data;
-    ASSERT_NO_THROW(decoded_data = codec.decode32(encoded_data, num_snapshots, decoder_prev_snapshot));
+    auto decoded_result = codec.decode32(encoded_data, num_snapshots, decoder_prev_snapshot);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // 4. Verify the decoded data
     ASSERT_EQ(decoded_data.size(), original_data.size());

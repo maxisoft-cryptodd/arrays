@@ -5,7 +5,6 @@
 #endif
 
 #include <gtest/gtest.h>
-#include "../src/storage/storage_backend.h"
 #include "../src/file_format/cdd_file_format.h"
 #include "../src/data_io/data_writer.h"
 #include "../src/data_io/data_reader.h"
@@ -13,20 +12,22 @@
 #include <random>
 // Include the single-header UUID library for unique filenames
 #include <stduuid/uuid.h>
+#include "../src/codecs/zstd_compressor.h"
+#include "../src/storage/memory_backend.h"
 
 namespace fs = std::filesystem;
 using namespace cryptodd;
 
 // Helper to generate random data
-std::vector<uint8_t> generate_random_data(size_t size) {
+std::vector<std::byte> generate_random_data(size_t size) {
     // Use a static generator for better performance and to avoid re-seeding on every call.
     static std::random_device rd;
     static std::mt19937 gen(rd());
     static std::uniform_int_distribution<> distrib(0, 255);
 
-    std::vector<uint8_t> data(size);
+    std::vector<std::byte> data(size);
     std::ranges::generate(data, []() {
-        return static_cast<uint8_t>(distrib(gen));
+        return static_cast<std::byte>(distrib(gen));
     });
     return data;
 }
@@ -49,27 +50,27 @@ fs::path generate_unique_test_filepath() {
 
 // Custom predicate assertion for verifying user metadata.
 // This encapsulates the decompression logic and provides a clear failure message.
-::testing::AssertionResult UserMetadataMatches(const DataReader& reader, const std::vector<uint8_t>& expected_meta) {
-    const auto& compressed_meta = reader.get_file_header().user_metadata;
-    std::vector<uint8_t> decompressed_meta;
-    try {
-        size_t bound = ZSTD_getFrameContentSize(compressed_meta.data(), compressed_meta.size());
-        if (bound == ZSTD_CONTENTSIZE_ERROR) {
-            return ::testing::AssertionFailure() << "User metadata is not a valid Zstd frame.";
-        }
-        decompressed_meta = DataReader::decompress_zstd(compressed_meta, bound);
-    } catch (const std::exception& e) {
-        return ::testing::AssertionFailure() << "Failed to decompress user metadata: " << e.what();
-    }
-
-    if (decompressed_meta == expected_meta) {
+::testing::AssertionResult UserMetadataMatches(const DataReader& reader, std::span<const std::byte> expected_meta) {
+    const auto& compressed_meta = reader.get_file_header().user_metadata();
+    if (compressed_meta.empty() && expected_meta.empty()) {
         return ::testing::AssertionSuccess();
     }
 
-    return ::testing::AssertionFailure()
-           << "User metadata does not match.\n"
-           << "      Expected: " << std::string(expected_meta.begin(), expected_meta.end()) << "\n"
-           << "        Actual: " << std::string(decompressed_meta.begin(), decompressed_meta.end());
+    // Use a local compressor instance to decompress the metadata for verification.
+    ZstdCompressor compressor;
+    auto decompressed_result = compressor.decompress(compressed_meta);
+    if (!decompressed_result) {
+        return ::testing::AssertionFailure() << "Failed to decompress user metadata: " << decompressed_result.error();
+    }
+
+    if (std::equal(decompressed_result->begin(), decompressed_result->end(), expected_meta.begin(), expected_meta.end())) {
+        return ::testing::AssertionSuccess();
+    }
+
+    // This conversion to string is only for readable test output and assumes ASCII-compatible content.
+    return ::testing::AssertionFailure() << "User metadata does not match.\n"
+           << "      Expected: " << std::string(reinterpret_cast<const char*>(expected_meta.data()), expected_meta.size()) << "\n"
+           << "        Actual: " << std::string(reinterpret_cast<const char*>(decompressed_result->data()), decompressed_result->size());
 }
 
 // Test fixture for file-based tests
@@ -98,224 +99,300 @@ protected:
 
 TEST_F(CddFileTest, WriteAndReadEmptyFile) {
     // Create a new file
-    DataWriter writer = DataWriter::create_new(test_filepath_);
-    writer.flush(); // Ensure header is written
+    {
+        auto writer_result = DataWriter::create_new(test_filepath_);
+        ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+        auto writer = std::move(*writer_result);
+        auto flush_result = writer->flush(); // Ensure header is written
+        ASSERT_TRUE(flush_result.has_value()) << flush_result.error();
+    }
 
     // Read the file
-    const DataReader reader = DataReader::open(test_filepath_);
-    ASSERT_EQ(reader.num_chunks(), 0);
+    auto reader_result = DataReader::open(test_filepath_);
+    ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+    auto reader = std::move(*reader_result);
+    ASSERT_EQ(reader->num_chunks(), 0);
 }
 
 TEST_F(CddFileTest, WriteAndReadSingleChunk) {
-    std::vector<uint8_t> original_data = generate_random_data(1024);
+    auto original_data = generate_random_data(1024);
     std::vector<uint32_t> shape = {32, 32, 0}; // 32x32 array, null-terminated
-    std::vector<uint8_t> user_meta = {'u', 's', 'e', 'r', ' ', 'm', 'e', 't', 'a'};
+    const std::vector<std::byte> user_meta = {
+        std::byte('u'), std::byte('s'), std::byte('e'), std::byte('r'),
+        std::byte(' '), std::byte('m'), std::byte('e'), std::byte('t'), std::byte('a')
+    };
 
     // Write
-    DataWriter writer = DataWriter::create_new(test_filepath_, 10, user_meta); // Capacity 10, user metadata
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape, original_data);
-    writer.flush();
+    {
+        auto writer_result = DataWriter::create_new(test_filepath_, 10, user_meta); // Capacity 10, user metadata
+        ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+        auto writer = std::move(*writer_result);
+        auto append_result = writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape, original_data);
+        ASSERT_TRUE(append_result.has_value()) << append_result.error();
+        auto flush_result = writer->flush();
+        ASSERT_TRUE(flush_result.has_value()) << flush_result.error();
+    }
 
     // Read
-    DataReader reader = DataReader::open(test_filepath_);
-    ASSERT_EQ(reader.num_chunks(), 1);
+    auto reader_result = DataReader::open(test_filepath_);
+    ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+    auto reader = std::move(*reader_result);
+    ASSERT_EQ(reader->num_chunks(), 1);
 
     // Verify user metadata using a custom predicate for better error messages.
-    EXPECT_TRUE(UserMetadataMatches(reader, user_meta));
+    EXPECT_TRUE(UserMetadataMatches(*reader, user_meta));
 
-    Chunk read_chunk = reader.get_chunk(0);
-    ASSERT_EQ(read_chunk.type, ChunkDataType::RAW); // Should be RAW after decompression
-    ASSERT_EQ(read_chunk.dtype, DType::UINT8);
-    ASSERT_EQ(read_chunk.flags, ChunkFlags::NONE);
-    ASSERT_EQ(read_chunk.shape, shape);
-    ASSERT_EQ(read_chunk.data, original_data);
+    auto chunk_result = reader->get_chunk(0);
+    ASSERT_TRUE(chunk_result.has_value()) << chunk_result.error();
+    auto& read_chunk = *chunk_result;
+    ASSERT_EQ(read_chunk.type(), ChunkDataType::RAW); // Should be RAW after decompression
+    ASSERT_EQ(read_chunk.dtype(), DType::UINT8);
+    ASSERT_EQ(read_chunk.flags(), ChunkFlags::NONE);
+    ASSERT_EQ(read_chunk.shape(), shape);
+    ASSERT_EQ(read_chunk.data(), original_data);
 }
 
 TEST_F(CddFileTest, WriteAndReadMultipleChunksSingleBlock) {
-    std::vector<uint8_t> data1 = generate_random_data(512);
-    std::vector<uint8_t> data2 = generate_random_data(2048);
+    auto data1 = generate_random_data(512);
+    auto data2 = generate_random_data(2048);
     std::vector<uint32_t> shape1 = {16, 32, 0};
     std::vector<uint32_t> shape2 = {64, 32, 0};
 
     // Write
-    DataWriter writer = DataWriter::create_new(test_filepath_, 2); // Capacity 2
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape1, data1);
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape2, data2);
-    writer.flush();
+    {
+        auto writer_result = DataWriter::create_new(test_filepath_, 2); // Capacity 2
+        ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+        auto writer = std::move(*writer_result);
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape1, data1).has_value());
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape2, data2).has_value());
+        ASSERT_TRUE(writer->flush().has_value());
+    }
 
     // Read
-    DataReader reader = DataReader::open(test_filepath_);
-    ASSERT_EQ(reader.num_chunks(), 2);
+    auto reader_result = DataReader::open(test_filepath_);
+    ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+    auto reader = std::move(*reader_result);
+    ASSERT_EQ(reader->num_chunks(), 2);
 
-    Chunk read_chunk1 = reader.get_chunk(0);
-    ASSERT_EQ(read_chunk1.data, data1);
-    ASSERT_EQ(read_chunk1.shape, shape1);
+    auto chunk1_result = reader->get_chunk(0);
+    ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
+    ASSERT_EQ(chunk1_result->data(), data1);
+    ASSERT_EQ(chunk1_result->shape(), shape1);
 
-    Chunk read_chunk2 = reader.get_chunk(1);
-    ASSERT_EQ(read_chunk2.data, data2);
-    ASSERT_EQ(read_chunk2.shape, shape2);
+    auto chunk2_result = reader->get_chunk(1);
+    ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
+    ASSERT_EQ(chunk2_result->data(), data2);
+    ASSERT_EQ(chunk2_result->shape(), shape2);
 }
 
 TEST_F(CddFileTest, WriteAndReadMultipleChunksMultipleBlocks) {
-    std::vector<uint8_t> data1 = generate_random_data(512);
-    std::vector<uint8_t> data2 = generate_random_data(2048);
-    std::vector<uint8_t> data3 = generate_random_data(100);
+    auto data1 = generate_random_data(512);
+    auto data2 = generate_random_data(2048);
+    auto data3 = generate_random_data(100);
     std::vector<uint32_t> shape1 = {16, 32, 0}; // 16*32 = 512
     std::vector<uint32_t> shape2 = {32, 64, 0}; // 32*64 = 2048
     std::vector<uint32_t> shape3 = {10, 10, 0}; // 10*10 = 100
 
     // Write
-    DataWriter writer = DataWriter::create_new(test_filepath_, 1); // Capacity 1, forces new block on second chunk
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape1, data1);
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape2, data2);
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape3, data3);
-    writer.flush();
+    {
+        auto writer_result = DataWriter::create_new(test_filepath_, 1); // Capacity 1, forces new block on second chunk
+        ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+        auto writer = std::move(*writer_result);
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape1, data1).has_value());
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape2, data2).has_value());
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape3, data3).has_value());
+        ASSERT_TRUE(writer->flush().has_value());
+    }
 
     // Read
-    DataReader reader = DataReader::open(test_filepath_);
-    ASSERT_EQ(reader.num_chunks(), 3);
+    auto reader_result = DataReader::open(test_filepath_);
+    ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+    auto reader = std::move(*reader_result);
+    ASSERT_EQ(reader->num_chunks(), 3);
 
-    Chunk read_chunk1 = reader.get_chunk(0);
-    ASSERT_EQ(read_chunk1.shape, shape1);
-    ASSERT_EQ(read_chunk1.data, data1);
+    auto chunk1_result = reader->get_chunk(0);
+    ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
+    ASSERT_EQ(chunk1_result->shape(), shape1);
+    ASSERT_EQ(chunk1_result->data(), data1);
 
-    Chunk read_chunk2 = reader.get_chunk(1);
-    ASSERT_EQ(read_chunk2.shape, shape2);
-    ASSERT_EQ(read_chunk2.data, data2);
+    auto chunk2_result = reader->get_chunk(1);
+    ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
+    ASSERT_EQ(chunk2_result->shape(), shape2);
+    ASSERT_EQ(chunk2_result->data(), data2);
 
-    Chunk read_chunk3 = reader.get_chunk(2);
-    ASSERT_EQ(read_chunk3.shape, shape3);
-    ASSERT_EQ(read_chunk3.data, data3);
+    auto chunk3_result = reader->get_chunk(2);
+    ASSERT_TRUE(chunk3_result.has_value()) << chunk3_result.error();
+    ASSERT_EQ(chunk3_result->shape(), shape3);
+    ASSERT_EQ(chunk3_result->data(), data3);
 }
 
 TEST_F(CddFileTest, AppendToExistingFile) {
-    std::vector<uint8_t> data1 = generate_random_data(512);
+    auto data1 = generate_random_data(512);
     std::vector<uint32_t> shape1 = {16, 32, 0}; // 16*32 = 512
 
     // Create file with one chunk
     {
-        DataWriter writer = DataWriter::create_new(test_filepath_, 1); // Capacity 1
-        writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape1, data1);
-        writer.flush();
+        auto writer_result = DataWriter::create_new(test_filepath_, 1); // Capacity 1
+        ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+        auto writer = std::move(*writer_result);
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape1, data1).has_value());
+        ASSERT_TRUE(writer->flush().has_value());
     }
 
     // Append a new chunk
-    std::vector<uint8_t> data2 = generate_random_data(1024);
+    auto data2 = generate_random_data(1024);
     std::vector<uint32_t> shape2 = {32, 32, 0}; // 32*32 = 1024
     {
-        DataWriter writer = DataWriter::open_for_append(test_filepath_); // Open for appending
-        writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape2, data2);
-        writer.flush();
+        auto writer_result = DataWriter::open_for_append(test_filepath_); // Open for appending
+        ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+        auto writer = std::move(*writer_result);
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape2, data2).has_value());
+        ASSERT_TRUE(writer->flush().has_value());
     }
 
     // Read and verify
-    DataReader reader = DataReader::open(test_filepath_);
-    ASSERT_EQ(reader.num_chunks(), 2);
-    Chunk chunk1 = reader.get_chunk(0);
-    ASSERT_EQ(chunk1.shape, shape1);
-    ASSERT_EQ(chunk1.data, data1);
-    Chunk chunk2 = reader.get_chunk(1);
-    ASSERT_EQ(chunk2.shape, shape2);
-    ASSERT_EQ(chunk2.data, data2);
+    auto reader_result = DataReader::open(test_filepath_);
+    ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+    auto reader = std::move(*reader_result);
+    ASSERT_EQ(reader->num_chunks(), 2);
+
+    auto chunk1_result = reader->get_chunk(0);
+    ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
+    ASSERT_EQ(chunk1_result->shape(), shape1);
+    ASSERT_EQ(chunk1_result->data(), data1);
+
+    auto chunk2_result = reader->get_chunk(1);
+    ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
+    ASSERT_EQ(chunk2_result->shape(), shape2);
+    ASSERT_EQ(chunk2_result->data(), data2);
 }
 
 TEST_F(CddFileTest, GetChunkSlice) {
-    std::vector<uint8_t> data1 = generate_random_data(100);
-    std::vector<uint8_t> data2 = generate_random_data(200);
-    std::vector<uint8_t> data3 = generate_random_data(300);
-    std::vector<uint8_t> data4 = generate_random_data(400);
+    auto data1 = generate_random_data(100);
+    auto data2 = generate_random_data(200);
+    auto data3 = generate_random_data(300);
+    auto data4 = generate_random_data(400);
     std::vector<uint32_t> shape1 = {10, 10, 0};   // 100 bytes
     std::vector<uint32_t> shape2 = {10, 20, 0};   // 200 bytes
     std::vector<uint32_t> shape3 = {15, 20, 0};   // 300 bytes
     std::vector<uint32_t> shape4 = {20, 20, 0};   // 400 bytes
 
     // Write 4 chunks
-    DataWriter writer = DataWriter::create_new(test_filepath_, 2); // Capacity 2
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape1, data1);
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape2, data2);
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape3, data3);
-    writer.append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape4, data4);
-    writer.flush();
+    {
+        auto writer_result = DataWriter::create_new(test_filepath_, 2); // Capacity 2
+        ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+        auto writer = std::move(*writer_result);
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape1, data1).has_value());
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape2, data2).has_value());
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape3, data3).has_value());
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::NONE, shape4, data4).has_value());
+        ASSERT_TRUE(writer->flush().has_value());
+    }
 
-    DataReader reader = DataReader::open(test_filepath_);
-    ASSERT_EQ(reader.num_chunks(), 4);
+    auto reader_result = DataReader::open(test_filepath_);
+    ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+    auto reader = std::move(*reader_result);
+    ASSERT_EQ(reader->num_chunks(), 4);
 
     // Get slice [0, 1]
-    std::vector<std::vector<uint8_t>> slice1 = reader.get_chunk_slice(0, 1);
+    auto slice1_result = reader->get_chunk_slice(0, 1);
+    ASSERT_TRUE(slice1_result.has_value()) << slice1_result.error();
+    auto& slice1 = *slice1_result;
     ASSERT_EQ(slice1.size(), 2);
     ASSERT_EQ(slice1[0], data1);
     ASSERT_EQ(slice1[1], data2);
 
     // Get slice [1, 3]
-    std::vector<std::vector<uint8_t>> slice2 = reader.get_chunk_slice(1, 3);
+    auto slice2_result = reader->get_chunk_slice(1, 3);
+    ASSERT_TRUE(slice2_result.has_value()) << slice2_result.error();
+    auto& slice2 = *slice2_result;
     ASSERT_EQ(slice2.size(), 3);
     ASSERT_EQ(slice2[0], data2);
     ASSERT_EQ(slice2[1], data3);
     ASSERT_EQ(slice2[2], data4);
 
     // Get slice [2, 2]
-    std::vector<std::vector<uint8_t>> slice3 = reader.get_chunk_slice(2, 2);
+    auto slice3_result = reader->get_chunk_slice(2, 2);
+    ASSERT_TRUE(slice3_result.has_value()) << slice3_result.error();
+    auto& slice3 = *slice3_result;
     ASSERT_EQ(slice3.size(), 1);
     ASSERT_EQ(slice3[0], data3);
 }
 
 TEST_F(CddFileTest, MemoryBackendTest) {
-    std::vector<uint8_t> original_data = generate_random_data(1024);
+    auto original_data = generate_random_data(1024);
 
-    MemoryBackend mem_backend;
-    // For in-memory, we need to manually construct DataWriter to use MemoryBackend
-    // This requires modifying DataWriter to accept a backend directly, or creating a test-specific writer.
-    // For now, let's just test MemoryBackend directly.
+    storage::MemoryBackend mem_backend;
 
-    mem_backend.seek(0);
-    mem_backend.write(original_data);
-    ASSERT_EQ(mem_backend.size(), 1024);
+    ASSERT_TRUE(mem_backend.seek(0).has_value());
+    auto write_res = mem_backend.write(original_data);
+    ASSERT_TRUE(write_res.has_value()) << write_res.error();
+    auto size_res = mem_backend.size();
+    ASSERT_TRUE(size_res.has_value()) << size_res.error();
+    ASSERT_EQ(*size_res, 1024);
 
-    std::vector<uint8_t> read_data(1024);
-    mem_backend.seek(0);
-    mem_backend.read(read_data);
+    std::vector<std::byte> read_data(1024);
+    ASSERT_TRUE(mem_backend.seek(0).has_value());
+    auto read_res = mem_backend.read(read_data);
+    ASSERT_TRUE(read_res.has_value()) << read_res.error();
     ASSERT_EQ(read_data, original_data);
 
-    mem_backend.seek(512);
-    ASSERT_EQ(mem_backend.tell(), 512);
+    ASSERT_TRUE(mem_backend.seek(512).has_value());
+    auto tell_res = mem_backend.tell();
+    ASSERT_TRUE(tell_res.has_value()) << tell_res.error();
+    ASSERT_EQ(*tell_res, 512);
 
-    std::vector<uint8_t> partial_data = generate_random_data(100);
-    mem_backend.seek(512);
-    mem_backend.write(partial_data);
-    ASSERT_EQ(mem_backend.size(), 1024); // Size should not change if overwriting within bounds
+    auto partial_data = generate_random_data(100);
+    ASSERT_TRUE(mem_backend.seek(512).has_value());
+    ASSERT_TRUE(mem_backend.write(partial_data).has_value());
+    size_res = mem_backend.size();
+    ASSERT_TRUE(size_res.has_value()) << size_res.error();
+    ASSERT_EQ(*size_res, 1024); // Size should not change if overwriting within bounds
 
-    std::vector<uint8_t> extended_data = generate_random_data(200);
-    mem_backend.seek(1100);
-    mem_backend.write(extended_data);
-    ASSERT_EQ(mem_backend.size(), 1300); // Size should extend
+    auto extended_data = generate_random_data(200);
+    ASSERT_TRUE(mem_backend.seek(1100).has_value());
+    ASSERT_TRUE(mem_backend.write(extended_data).has_value());
+    size_res = mem_backend.size();
+    ASSERT_TRUE(size_res.has_value()) << size_res.error();
+    ASSERT_EQ(*size_res, 1300); // Size should extend
 }
 
 TEST_F(CddFileTest, InMemoryWriterToReader) {
-    std::vector<uint8_t> data1 = generate_random_data(100);
-    std::vector<uint8_t> data2 = generate_random_data(200);
+    auto data1 = generate_random_data(100);
+    auto data2 = generate_random_data(200);
     std::vector<uint32_t> shape = {10, 10, 0};
 
-    // The DataWriter takes ownership of the backend, so we can't share it directly.
-    // We create a writer, let it go out of scope, and then create a reader with the same backend.
-    std::unique_ptr<IStorageBackend> mem_backend;
+    std::unique_ptr<storage::IStorageBackend> mem_backend;
 
     // Write to the in-memory backend
     {
-        DataWriter writer = DataWriter::create_in_memory(128, {});
-        writer.append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data1);
-        writer.append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data2);
-        writer.flush();
-        mem_backend = std::move(writer.release_backend()); // Retrieve the backend from the writer
+        auto writer_result = DataWriter::create_in_memory(128, {});
+        ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+        auto writer = std::move(*writer_result);
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data1).has_value());
+        ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data2).has_value());
+        ASSERT_TRUE(writer->flush().has_value());
+        auto backend_result = writer->release_backend(); // Retrieve the backend from the writer
+        ASSERT_TRUE(backend_result.has_value()) << backend_result.error();
+        mem_backend = std::move(*backend_result);
     }
 
     // Manually rewind the backend before passing it to the reader. This is the caller's responsibility.
-    mem_backend->rewind();
+    ASSERT_TRUE(mem_backend->rewind().has_value());
 
     // Read from the same in-memory backend
-    DataReader reader = DataReader::open_in_memory(std::move(mem_backend));
-    ASSERT_EQ(reader.num_chunks(), 2);
-    ASSERT_EQ(reader.get_chunk(0).data, data1);
-    ASSERT_EQ(reader.get_chunk(1).data, data2);
+    auto reader_result = DataReader::open_in_memory(std::move(mem_backend));
+    ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+    auto reader = std::move(*reader_result);
+    ASSERT_EQ(reader->num_chunks(), 2);
+
+    auto chunk1_result = reader->get_chunk(0);
+    ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
+    ASSERT_EQ(chunk1_result->data(), data1);
+
+    auto chunk2_result = reader->get_chunk(1);
+    ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
+    ASSERT_EQ(chunk2_result->data(), data2);
 }
 
 // --- Parameterized Test for Chunk Offset Block Chaining ---
@@ -337,29 +414,35 @@ TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
     const size_t num_extra_chunks = params.num_extra_chunks;
     const size_t total_chunks = capacity + num_extra_chunks;
 
-    std::vector<std::vector<uint8_t>> original_data_chunks;
+    std::vector<std::vector<std::byte>> original_data_chunks;
     original_data_chunks.reserve(total_chunks);
 
     // --- Test with FileBackend ---
     {
         // --- WRITE ---
         {
-            DataWriter writer = DataWriter::create_new(test_filepath_, capacity);
+            auto writer_result = DataWriter::create_new(test_filepath_, capacity);
+            ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+            auto writer = std::move(*writer_result);
             for (size_t i = 0; i < total_chunks; ++i) {
-                std::vector<uint8_t> data = generate_random_data(10 + i); // Varying sizes
+                auto data = generate_random_data(10 + i); // Varying sizes
                 original_data_chunks.push_back(data);
                 std::vector<uint32_t> shape = {static_cast<uint32_t>(data.size()), 0};
-                writer.append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data);
+                ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data).has_value());
             }
-            writer.flush();
+            ASSERT_TRUE(writer->flush().has_value());
         }
 
         // --- READ and VERIFY ---
         {
-            DataReader reader = DataReader::open(test_filepath_);
-            ASSERT_EQ(reader.num_chunks(), total_chunks);
+            auto reader_result = DataReader::open(test_filepath_);
+            ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+            auto reader = std::move(*reader_result);
+            ASSERT_EQ(reader->num_chunks(), total_chunks);
             for (size_t i = 0; i < total_chunks; ++i) {
-                ASSERT_EQ(reader.get_chunk(i).data, original_data_chunks[i]) << "FileBackend: Mismatch at chunk " << i;
+                auto chunk_result = reader->get_chunk(i);
+                ASSERT_TRUE(chunk_result.has_value()) << chunk_result.error();
+                ASSERT_EQ(chunk_result->data(), original_data_chunks[i]) << "FileBackend: Mismatch at chunk " << i;
             }
         }
     }
@@ -367,27 +450,35 @@ TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
     // --- Test with MemoryBackend ---
     original_data_chunks.clear(); // Reset for memory test
     {
-        std::unique_ptr<IStorageBackend> mem_backend;
+        std::unique_ptr<storage::IStorageBackend> mem_backend;
         // --- WRITE ---
         {
-            DataWriter writer = DataWriter::create_in_memory(capacity);
+            auto writer_result = DataWriter::create_in_memory(capacity);
+            ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+            auto writer = std::move(*writer_result);
             for (size_t i = 0; i < total_chunks; ++i) {
-                std::vector<uint8_t> data = generate_random_data(10 + i);
+                auto data = generate_random_data(10 + i);
                 original_data_chunks.push_back(data);
                 std::vector<uint32_t> shape = {static_cast<uint32_t>(data.size()), 0};
-                writer.append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data);
+                ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data).has_value());
             }
-            writer.flush();
-            mem_backend = writer.release_backend();
+            ASSERT_TRUE(writer->flush().has_value());
+            auto backend_result = writer->release_backend();
+            ASSERT_TRUE(backend_result.has_value()) << backend_result.error();
+            mem_backend = std::move(*backend_result);
         }
 
         // --- READ and VERIFY ---
         {
-            mem_backend->rewind();
-            DataReader reader = DataReader::open_in_memory(std::move(mem_backend));
-            ASSERT_EQ(reader.num_chunks(), total_chunks);
+            ASSERT_TRUE(mem_backend->rewind().has_value());
+            auto reader_result = DataReader::open_in_memory(std::move(mem_backend));
+            ASSERT_TRUE(reader_result.has_value()) << reader_result.error();
+            auto reader = std::move(*reader_result);
+            ASSERT_EQ(reader->num_chunks(), total_chunks);
             for (size_t i = 0; i < total_chunks; ++i) {
-                ASSERT_EQ(reader.get_chunk(i).data, original_data_chunks[i]) << "MemoryBackend: Mismatch at chunk " << i;
+                auto chunk_result = reader->get_chunk(i);
+                ASSERT_TRUE(chunk_result.has_value()) << chunk_result.error();
+                ASSERT_EQ(chunk_result->data(), original_data_chunks[i]) << "MemoryBackend: Mismatch at chunk " << i;
             }
         }
     }

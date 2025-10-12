@@ -1,6 +1,7 @@
 #pragma once
 
 #include "i_compressor.h"
+#include <cstdint>
 #include <memory>
 #include <span>
 
@@ -10,7 +11,7 @@ class ZstdCompressor final : public ICompressor {
 public:
     static constexpr int DEFAULT_COMPRESSION_LEVEL = 1;
     // Constructor takes an optional dictionary.
-    explicit ZstdCompressor(std::span<const uint8_t> dict, int level = DEFAULT_COMPRESSION_LEVEL);
+    explicit ZstdCompressor(std::span<const std::byte> dict, int level = DEFAULT_COMPRESSION_LEVEL);
     explicit ZstdCompressor(int level = DEFAULT_COMPRESSION_LEVEL);
     ~ZstdCompressor() override;
 
@@ -21,8 +22,8 @@ public:
     ZstdCompressor& operator=(ZstdCompressor&&) noexcept;
 
     // --- Interface Implementation ---
-    std::vector<uint8_t> compress(std::span<const uint8_t> uncompressed_data) override;
-    std::vector<uint8_t> decompress(std::span<const uint8_t> compressed_data) override;
+    std::expected<std::vector<std::byte>, std::string> compress(std::span<const std::byte> uncompressed_data) override;
+    std::expected<std::vector<std::byte>, std::string> decompress(std::span<const std::byte> compressed_data) override;
 
     void set_level(int level);
 
