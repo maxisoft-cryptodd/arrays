@@ -55,11 +55,15 @@ TEST_F(Temporal2dSimdCodecTest, Static_FullPipelineRoundTrip_Float16) {
     auto decoder_prev_row = initial_prev_row_float;
 
     // Encode
-    std::vector<uint8_t> encoded_data = codec.encode16(original_float_data, initial_prev_row_float, workspace);
+    auto encoded_result = codec.encode16(original_float_data, initial_prev_row_float, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // Decode
-    std::vector<float> decoded_data = codec.decode16(encoded_data, kNumRows, decoder_prev_row);
+    auto decoded_result = codec.decode16(encoded_data, kNumRows, decoder_prev_row);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // Verify data
     ASSERT_EQ(decoded_data.size(), original_float_data.size());
@@ -81,11 +85,15 @@ TEST_F(Temporal2dSimdCodecTest, Static_FullPipelineRoundTrip_Float32) {
     auto decoder_prev_row = initial_prev_row_float;
 
     // Encode
-    std::vector<uint8_t> encoded_data = codec.encode32(original_float_data, initial_prev_row_float, workspace);
+    auto encoded_result = codec.encode32(original_float_data, initial_prev_row_float, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // Decode
-    std::vector<float> decoded_data = codec.decode32(encoded_data, kNumRows, decoder_prev_row);
+    auto decoded_result = codec.decode32(encoded_data, kNumRows, decoder_prev_row);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_float_data.size());
@@ -107,11 +115,15 @@ TEST_F(Temporal2dSimdCodecTest, Static_FullPipelineRoundTrip_Int64) {
     auto decoder_prev_row = initial_prev_row_int64;
 
     // Encode
-    std::vector<uint8_t> encoded_data = codec.encode64(original_int64_data, initial_prev_row_int64, workspace);
+    auto encoded_result = codec.encode64(original_int64_data, initial_prev_row_int64, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // Decode
-    std::vector<int64_t> decoded_data = codec.decode64(encoded_data, kNumRows, decoder_prev_row);
+    auto decoded_result = codec.decode64(encoded_data, kNumRows, decoder_prev_row);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_int64_data.size());
@@ -133,11 +145,15 @@ TEST_F(Temporal2dSimdCodecTest, Dynamic_FullPipelineRoundTrip_Float32) {
     std::vector<float> decoder_prev_row(initial_prev_row_float.begin(), initial_prev_row_float.end());
 
     // Encode
-    std::vector<uint8_t> encoded_data = codec.encode32(original_float_data, decoder_prev_row, workspace);
+    auto encoded_result = codec.encode32(original_float_data, decoder_prev_row, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // Decode
-    std::vector<float> decoded_data = codec.decode32(encoded_data, decoder_prev_row);
+    auto decoded_result = codec.decode32(encoded_data, decoder_prev_row);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_float_data.size());

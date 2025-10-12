@@ -49,11 +49,15 @@ TEST_F(Temporal1dSimdCodecTest, FullPipeline_Float16_Xor_Shuffle) {
     float decoder_prev_element = initial_prev_element_float;
 
     // Encode
-    std::vector<uint8_t> encoded_data = codec.encode16_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace);
+    auto encoded_result = codec.encode16_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // Decode
-    std::vector<float> decoded_data = codec.decode16_Xor_Shuffle(encoded_data, kNumElements, decoder_prev_element);
+    auto decoded_result = codec.decode16_Xor_Shuffle(encoded_data, kNumElements, decoder_prev_element);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // Verify data
     ASSERT_EQ(decoded_data.size(), original_float_data.size());
@@ -72,11 +76,15 @@ TEST_F(Temporal1dSimdCodecTest, FullPipeline_Float32_Xor_Shuffle) {
     float decoder_prev_element = initial_prev_element_float;
 
     // Encode
-    std::vector<uint8_t> encoded_data = codec.encode32_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace);
+    auto encoded_result = codec.encode32_Xor_Shuffle(original_float_data, initial_prev_element_float, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // Decode
-    std::vector<float> decoded_data = codec.decode32_Xor_Shuffle(encoded_data, kNumElements, decoder_prev_element);
+    auto decoded_result = codec.decode32_Xor_Shuffle(encoded_data, kNumElements, decoder_prev_element);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_float_data.size());
@@ -93,11 +101,15 @@ TEST_F(Temporal1dSimdCodecTest, FullPipeline_Int64_Xor) {
     int64_t decoder_prev_element = initial_prev_element_int64;
 
     // Encode
-    std::vector<uint8_t> encoded_data = codec.encode64_Xor(original_int64_data, initial_prev_element_int64, workspace);
+    auto encoded_result = codec.encode64_Xor(original_int64_data, initial_prev_element_int64, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // Decode
-    std::vector<int64_t> decoded_data = codec.decode64_Xor(encoded_data, kNumElements, decoder_prev_element);
+    auto decoded_result = codec.decode64_Xor(encoded_data, kNumElements, decoder_prev_element);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_int64_data.size());
@@ -114,11 +126,15 @@ TEST_F(Temporal1dSimdCodecTest, FullPipeline_Int64_Delta) {
     int64_t decoder_prev_element = initial_prev_element_int64;
 
     // Encode
-    std::vector<uint8_t> encoded_data = codec.encode64_Delta(original_int64_data, initial_prev_element_int64, workspace);
+    auto encoded_result = codec.encode64_Delta(original_int64_data, initial_prev_element_int64, workspace);
+    ASSERT_TRUE(encoded_result.has_value()) << encoded_result.error();
+    auto& encoded_data = *encoded_result;
     ASSERT_FALSE(encoded_data.empty());
 
     // Decode
-    std::vector<int64_t> decoded_data = codec.decode64_Delta(encoded_data, kNumElements, decoder_prev_element);
+    auto decoded_result = codec.decode64_Delta(encoded_data, kNumElements, decoder_prev_element);
+    ASSERT_TRUE(decoded_result.has_value()) << decoded_result.error();
+    auto& decoded_data = *decoded_result;
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_int64_data.size());

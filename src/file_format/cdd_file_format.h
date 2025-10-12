@@ -1,17 +1,15 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <vector>
 #include <string>
 #include <array>
-#include <numeric> // For std::iota
-#include <algorithm> // For std::min, std::copy
+#include <expected>
 #include <span>
 
-#include "../storage/storage_backend.h"
+#include "../storage/i_storage_backend.h"
 #include "blake3_stream_hasher.h"
-#include <zstd.h>
-#include <lz4.h>
 
 namespace cryptodd {
 
@@ -31,7 +29,10 @@ enum class ChunkDataType : uint16_t {
     ZSTD_COMPRESSED = 1,
     OKX_OB_SIMD_F16 = 2,
     OKX_OB_SIMD_F32 = 3,
-    GENERIC_OB_SIMD = 4
+    BINANCE_OB_SIMD_F16 = 4,
+    BINANCE_OB_SIMD_F32 = 5,
+    GENERIC_OB_SIMD_F16 = 6,
+    GENERIC_OB_SIMD_F32 = 7
 };
 
 enum class DType : uint16_t {
@@ -45,7 +46,8 @@ enum class DType : uint16_t {
     INT32 = 7,
     UINT32 = 8,
     INT64 = 9,
-    UINT64 = 10
+    UINT64 = 10,
+    BFLOAT16 = 11
 };
 
 enum ChunkFlags : uint64_t {
@@ -69,7 +71,7 @@ enum ChunkFlags : uint64_t {
  */
 constexpr size_t get_dtype_size(const DType dtype) {
     switch (dtype) {
-        case DType::FLOAT16: return 2;
+        case DType::FLOAT16: case DType::BFLOAT16: return 2;
         case DType::FLOAT32: return 4;
         case DType::FLOAT64: return 8;
         case DType::INT8: case DType::UINT8: return 1;
@@ -80,214 +82,127 @@ constexpr size_t get_dtype_size(const DType dtype) {
     return 0; // Should be unreachable if all DTypes are handled
 }
 
-// --- Helper Functions for Serialization/Deserialization ---
-
-// Writes a POD type to the storage backend
-
-// Writes a POD type to the storage backend at a specific offset
-template<typename T>
-inline void write_pod_at(IStorageBackend& backend, const uint64_t offset, const T& value) {
-    backend.seek(offset);
-    backend.write(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(&value), sizeof(T)));
-}
-
-template<typename T>
-inline void write_pod(IStorageBackend& backend, const T& value) {
-    backend.write(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(&value), sizeof(T)));
-}
-
-// Reads a POD type from the storage backend
-template<typename T>
-inline T read_pod(IStorageBackend& backend) {
-    T value{};
-    if (backend.read(std::span<uint8_t>(reinterpret_cast<uint8_t*>(&value), sizeof(T))) != sizeof(T)) {
-        throw std::runtime_error("Failed to read data in read_pod.");
-    }
-    return value;
-}
-
-// Writes a vector of POD types
-template<typename T>
-inline void write_vector_pod(IStorageBackend& backend, std::span<const T> vec) {
-    write_pod(backend, static_cast<uint32_t>(vec.size()));
-    if (!vec.empty()) {
-        backend.write(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(vec.data()), vec.size_bytes()));
-    }
-}
-
-// Reads a vector of POD types
-template<typename T>
-inline std::vector<T> read_vector_pod(IStorageBackend& backend) {
-    auto size = read_pod<uint32_t>(backend);
-    std::vector<T> vec(size);
-    if (size > 0) { // If there are elements to read
-        const size_t bytes_to_read = size * sizeof(T);
-        std::span<uint8_t> buffer(reinterpret_cast<uint8_t*>(vec.data()), bytes_to_read);
-        if (backend.read(buffer) != bytes_to_read) {
-            throw std::runtime_error("Failed to read data in read_vector_pod.");
-        }
-    }
-    return vec;
-}
-
-// Writes a byte vector (blob) with a length prefix
-inline void write_blob(IStorageBackend& backend, std::span<const uint8_t> blob) {
-    write_pod(backend, static_cast<uint32_t>(blob.size()));
-    if (!blob.empty()) {
-        backend.write(blob);
-    }
-}
-
-// Reads a byte vector (blob) with a length prefix
-inline std::vector<uint8_t> read_blob(IStorageBackend& backend) {
-    auto size = read_pod<uint32_t>(backend);
-    std::vector<uint8_t> blob(size);
-    if (size > 0) {
-        if (backend.read(blob) != size) {
-            throw std::runtime_error("Failed to read data in read_blob.");
-        }
-    }
-    return blob;
-}
-
 // --- File Format Structures ---
 
 struct InternalMetadata {
     uint64_t chunk_offsets_block_capacity;
 
-    void write(IStorageBackend& backend) const {
-        write_pod(backend, chunk_offsets_block_capacity);
-    }
-
-    void read(IStorageBackend& backend) {
-        chunk_offsets_block_capacity = read_pod<uint64_t>(backend);
-    } 
+    // Read/Write would be implemented if this struct becomes more complex
 };
 
-struct FileHeader {
-    uint32_t magic = CDD_MAGIC;
-    uint16_t version = CDD_VERSION;
-    std::vector<uint8_t> internal_metadata; // Zstd compressed, length prefixed
-    std::vector<uint8_t> user_metadata;     // Zstd compressed, length prefixed
+/**
+ * @brief Represents the main header of a .cdd file, containing magic, version, and metadata.
+ */
+class FileHeader {
+    using IStorageBackend = storage::IStorageBackend;
+public:
+    [[nodiscard]] uint32_t magic() const { return magic_; }
+    [[nodiscard]] uint16_t version() const { return version_; }
+    [[nodiscard]] const std::vector<std::byte>& internal_metadata() const { return internal_metadata_; }
+    [[nodiscard]] const std::vector<std::byte>& user_metadata() const { return user_metadata_; }
+    
+    /** @brief Sets the internal metadata, taking ownership of the provided vector. */
+    void set_internal_metadata(std::vector<std::byte> metadata) { internal_metadata_ = std::move(metadata); }
+    /** @brief Sets the user-defined metadata, taking ownership of the provided vector. */
+    void set_user_metadata(std::vector<std::byte> metadata) { user_metadata_ = std::move(metadata); }
 
-    void write(IStorageBackend& backend) const {
-        write_pod(backend, magic);
-        write_pod(backend, version);
-        write_blob(backend, internal_metadata);
-        write_blob(backend, user_metadata);
-    }
+    std::expected<void, std::string> write(IStorageBackend& backend) const;
+    std::expected<void, std::string> read(IStorageBackend& backend);
 
-    void read(IStorageBackend& backend) {
-        magic = read_pod<uint32_t>(backend);
-        version = read_pod<uint16_t>(backend);
-        internal_metadata = read_blob(backend);
-        user_metadata = read_blob(backend);
-
-        if (magic != CDD_MAGIC) {
-            throw std::runtime_error("Invalid CDD file magic.");
-        }
-        if (version != CDD_VERSION) {
-            throw std::runtime_error("Unsupported CDD file version.");
-        }
-    }
+private:
+    uint32_t magic_ = CDD_MAGIC;
+    uint16_t version_ = CDD_VERSION;
+    std::vector<std::byte> internal_metadata_;
+    std::vector<std::byte> user_metadata_;
 };
 
-struct ChunkOffsetsBlock {
-    uint32_t size; // Size of this entire block in bytes (including size, type, hash, and offsets_and_pointer)
-    ChunkOffsetType type;
-    blake3_hash128_t hash; // BLAKE3 hash of offsets_and_pointer
-    std::vector<uint64_t> offsets_and_pointer; // Last element is next_index_offset
+/**
+ * @brief Represents a block in the file that stores offsets to data chunks.
+ * These blocks are chained together to form a master index.
+ */
+class ChunkOffsetsBlock {
+    using IStorageBackend = storage::IStorageBackend;
+public:
+    /** @brief The number of chunk offsets this block can hold (excluding the pointer to the next block). */
+    [[nodiscard]] size_t capacity() const;
+    /** @brief Gets the file offset of the next ChunkOffsetsBlock in the chain. */
+    [[nodiscard]] uint64_t get_next_index_offset() const;
+    /** @brief Sets the file offset of the next ChunkOffsetsBlock in the chain. */
+    void set_next_index_offset(uint64_t offset);
 
-    // Capacity of the offsets_and_pointer array (excluding the next_index_offset pointer)
-    [[nodiscard]] size_t capacity() const {
-        if (offsets_and_pointer.empty()) return 0;
-        return offsets_and_pointer.size() - 1;
-    }
+    // Other getters/setters
+    [[nodiscard]] uint32_t size() const { return size_; }
+    void set_size(uint32_t size) { size_ = size; }
 
-    // Get the next_index_offset
-    [[nodiscard]] uint64_t get_next_index_offset() const {
-        if (offsets_and_pointer.empty()) return 0;
-        return offsets_and_pointer.back();
-    }
+    [[nodiscard]] ChunkOffsetType type() const { return type_; }
+    void set_type(ChunkOffsetType type) { type_ = type; }
 
-    // Set the next_index_offset
-    void set_next_index_offset(uint64_t offset) {
-        if (offsets_and_pointer.empty()) {
-            throw std::runtime_error("Cannot set next_index_offset on an empty offsets_and_pointer vector.");
-        }
-        offsets_and_pointer.back() = offset;
-    }
+    [[nodiscard]] const blake3_hash128_t& hash() const { return hash_; }
+    void set_hash(const blake3_hash128_t& hash) { hash_ = hash; }
 
-    void write(IStorageBackend& backend) const {
-        uint64_t start_pos = backend.tell();
-        write_pod(backend, size);
-        write_pod(backend, static_cast<uint16_t>(type));
-        write_pod(backend, hash);
-        // ReSharper disable once CppTemplateArgumentsCanBeDeduced
-        write_vector_pod(backend, std::span<const uint64_t>(offsets_and_pointer));
-        // Ensure the recorded size is correct
-        if (backend.tell() - start_pos != size) {
-            throw std::runtime_error("ChunkOffsetsBlock size mismatch during write.");
-        }
-    }
+    [[nodiscard]] const std::vector<uint64_t>& offsets_and_pointer() const { return offsets_and_pointer_; }
+    void set_offsets_and_pointer(std::vector<uint64_t> offsets) { offsets_and_pointer_ = std::move(offsets); }
 
-    void read(IStorageBackend& backend) {
-        uint64_t start_pos = backend.tell();
-        size = read_pod<uint32_t>(backend);
-        type = static_cast<ChunkOffsetType>(read_pod<uint16_t>(backend));
-        hash = read_pod<blake3_hash128_t>(backend);
-        offsets_and_pointer = read_vector_pod<uint64_t>(backend);
+    std::expected<void, std::string> write(IStorageBackend& backend) const;
+    std::expected<void, std::string> read(IStorageBackend& backend);
 
-        // Validate hash (optional, can be done after reading all blocks)
-        // Validate size
-        if (backend.tell() - start_pos != size) {
-            throw std::runtime_error("ChunkOffsetsBlock size mismatch during read.");
-        }
-    }
+private:
+    uint32_t size_{};
+    ChunkOffsetType type_{};
+    blake3_hash128_t hash_{};
+    std::vector<uint64_t> offsets_and_pointer_;
 };
 
-struct Chunk {
-    uint32_t size; // Size of this entire chunk block in bytes (including all fields and data)
-    ChunkDataType type;
-    DType dtype;
-    blake3_hash128_t hash; // BLAKE3 hash of the raw (uncompressed) data
-    uint64_t flags;
-    std::vector<uint32_t> shape; // Null-terminated, so last element is 0
-    std::vector<uint8_t> data;
-
-    void write(IStorageBackend& backend) const {
-        uint64_t start_pos = backend.tell();
-        write_pod(backend, size);
-        write_pod(backend, static_cast<uint16_t>(type));
-        write_pod(backend, static_cast<uint16_t>(dtype));
-        write_pod(backend, hash);
-        write_pod(backend, flags);
-        // ReSharper disable once CppTemplateArgumentsCanBeDeduced
-        write_vector_pod(backend, std::span<const uint32_t>(shape)); // shape includes the null terminator
-        // ReSharper disable once CppTemplateArgumentsCanBeDeduced
-        write_blob(backend, std::span<const uint8_t>(data)); // data is length-prefixed by write_blob
-
-        // Ensure the recorded size is correct
-        if (backend.tell() - start_pos != size) {
-            throw std::runtime_error("Chunk size mismatch during write.");
-        }
+/**
+ * @brief Represents a single, self-contained block of data (a "chunk") with its associated metadata.
+ */
+class Chunk {
+    using IStorageBackend = storage::IStorageBackend;
+public:
+    /**
+     * @brief Returns a view of the chunk's shape, excluding the null terminator used for file format compatibility.
+     */
+    [[nodiscard]] std::span<const uint32_t> get_shape() const;
+    /** @brief Calculates the total number of elements in the chunk based on its shape. */
+    [[nodiscard]] size_t num_elements() const;
+    /** @brief Calculates the expected size of the raw data in bytes based on dtype and shape. */
+    [[nodiscard]] size_t expected_size() const
+    {
+        return get_dtype_size(dtype_) * num_elements();
     }
 
-    void read(IStorageBackend& backend) {
-        uint64_t start_pos = backend.tell();
-        size = read_pod<uint32_t>(backend);
-        type = static_cast<ChunkDataType>(read_pod<uint16_t>(backend));
-        dtype = static_cast<DType>(read_pod<uint16_t>(backend));
-        hash = read_pod<blake3_hash128_t>(backend);
-        flags = read_pod<uint64_t>(backend);
-        shape = read_vector_pod<uint32_t>(backend);
-        data = read_blob(backend);
+    // Getters
+    [[nodiscard]] uint32_t size() const { return size_; }
+    [[nodiscard]] ChunkDataType type() const { return type_; }
+    [[nodiscard]] DType dtype() const { return dtype_; }
+    [[nodiscard]] const blake3_hash128_t& hash() const { return hash_; }
+    [[nodiscard]] uint64_t flags() const { return flags_; }
+    [[nodiscard]] const std::vector<uint32_t>& shape() const { return shape_; }
+    [[nodiscard]] const std::vector<std::byte>& data() const { return data_; }
+    /** @brief Gets a mutable reference to the chunk's data vector. */
+    [[nodiscard]] std::vector<std::byte>& data() { return data_; }
 
-        // Validate size
-        if (backend.tell() - start_pos != size) {
-            throw std::runtime_error("Chunk size mismatch during read.");
-        }
-    }
+    // Setters
+    void set_size(uint32_t size) { size_ = size; }
+    void set_type(ChunkDataType type) { type_ = type; }
+    void set_dtype(DType dtype) { dtype_ = dtype; }
+    void set_hash(const blake3_hash128_t& hash) { hash_ = hash; }
+    void set_flags(uint64_t flags) { flags_ = flags; }
+    void set_shape(std::vector<uint32_t> shape) { shape_ = std::move(shape); }
+    /** @brief Sets the chunk's data, taking ownership of the provided vector. */
+    void set_data(std::vector<std::byte> data) { data_ = std::move(data); }
+
+    std::expected<void, std::string> write(IStorageBackend& backend) const;
+    std::expected<void, std::string> read(IStorageBackend& backend);
+
+private:
+    uint32_t size_{};
+    ChunkDataType type_{};
+    DType dtype_{};
+    blake3_hash128_t hash_{};
+    uint64_t flags_{};
+    std::vector<uint32_t> shape_;
+    std::vector<std::byte> data_;
 };
 
 } // namespace cryptodd

@@ -514,32 +514,32 @@ namespace cryptodd {
 
 // Define dispatchers that the header-based template functions can call.
 HWY_EXPORT(DemoteAndXor);
-HWY_NOINLINE void DemoteAndXor_dispatcher(const float* current, const float* prev, hwy::float16_t* out, size_t num_floats) {
+HWY_NOINLINE void simd::DemoteAndXor_dispatcher(const float* current, const float* prev, hwy::float16_t* out, size_t num_floats) {
     HWY_DYNAMIC_DISPATCH(DemoteAndXor)(current, prev, out, num_floats);
 }
 
 HWY_EXPORT(ShuffleFloat16);
-HWY_NOINLINE void ShuffleFloat16_dispatcher(const hwy::float16_t* in, uint8_t* out, size_t num_f16) {
+HWY_NOINLINE void simd::ShuffleFloat16_dispatcher(const hwy::float16_t* in, uint8_t* out, size_t num_f16) {
     HWY_DYNAMIC_DISPATCH(ShuffleFloat16)(in, out, num_f16);
 }
 
 HWY_EXPORT(UnshuffleAndReconstruct16);
-HWY_NOINLINE void UnshuffleAndReconstruct_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
+HWY_NOINLINE void simd::UnshuffleAndReconstruct_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
     HWY_DYNAMIC_DISPATCH(UnshuffleAndReconstruct16)(shuffled_in, out, num_snapshots, snapshot_floats, last_snapshot_state);
 }
 
 HWY_EXPORT(XorFloat32);
-HWY_NOINLINE void XorFloat32_dispatcher(const float* current, const float* prev, float* out, size_t num_floats) {
+HWY_NOINLINE void simd::XorFloat32_dispatcher(const float* current, const float* prev, float* out, size_t num_floats) {
     HWY_DYNAMIC_DISPATCH(XorFloat32)(current, prev, out, num_floats);
 }
 
 HWY_EXPORT(ShuffleFloat32);
-HWY_NOINLINE void ShuffleFloat32_dispatcher(const float* in, uint8_t* out, size_t num_f32) {
+HWY_NOINLINE void simd::ShuffleFloat32_dispatcher(const float* in, uint8_t* out, size_t num_f32) {
     HWY_DYNAMIC_DISPATCH(ShuffleFloat32)(in, out, num_f32);
 }
 
 HWY_EXPORT(UnshuffleAndReconstructFloat32);
-HWY_NOINLINE void UnshuffleAndReconstructFloat32_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
+HWY_NOINLINE void simd::UnshuffleAndReconstructFloat32_dispatcher(const uint8_t* shuffled_in, float* out, size_t num_snapshots, size_t snapshot_floats, std::span<float> last_snapshot_state) {
     HWY_DYNAMIC_DISPATCH(UnshuffleAndReconstructFloat32)(shuffled_in, out, num_snapshots, snapshot_floats, last_snapshot_state);
 }
 

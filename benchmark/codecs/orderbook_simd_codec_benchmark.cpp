@@ -51,8 +51,13 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Encode16)(benchmark::State& state) {
     // The workspace is part of the fixture, so it's reused across state loops.
     for (auto _ : state) {
         // Call the encode method on the instance created in SetUp.
-        std::vector<uint8_t> encoded_data = codec_->encode16(original_data, initial_prev_snapshot, workspace_);
-        benchmark::DoNotOptimize(encoded_data);
+        auto result = codec_->encode16(original_data, initial_prev_snapshot, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        // Move the result to prevent copy and ensure we're benchmarking the move.
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_data.size() * sizeof(float));
     state.SetLabel("Snapshots: " + std::to_string(state.range(0)));
@@ -63,14 +68,23 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Decode16)(benchmark::State& state) {
     const size_t num_snapshots = state.range(0);
     cryptodd::OrderbookSimdCodecWorkspace workspace; // Create a workspace for the one-time encoding.
     // Pre-encode the data once using the fixture's codec, so we only measure decoding time.
-    std::vector<uint8_t> encoded_data = codec_->encode16(original_data, initial_prev_snapshot, workspace);
+    auto encode_result = codec_->encode16(original_data, initial_prev_snapshot, workspace);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded_data = std::move(*encode_result);
 
     for (auto _ : state) {
         // The decoder modifies its previous snapshot state, so we must reset it for each run.
         cryptodd::OkxObSimdCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
         // Call the decode method on the instance.
-        std::vector<float> decoded_data = codec_->decode16(encoded_data, num_snapshots, decoder_prev_snapshot);
-        benchmark::DoNotOptimize(decoded_data);
+        auto result = codec_->decode16(encoded_data, num_snapshots, decoder_prev_snapshot);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_data.size() * sizeof(float));
     state.SetLabel("Snapshots: " + std::to_string(state.range(0)));
@@ -91,8 +105,12 @@ BENCHMARK_REGISTER_F(OkxObSimdCodecBenchmark, Decode16)
 BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Encode32)(benchmark::State& state) {
     // The workspace is part of the fixture, so it's reused across state loops.
     for (auto _ : state) {
-        std::vector<uint8_t> encoded_data = codec_->encode32(original_data, initial_prev_snapshot, workspace_);
-        benchmark::DoNotOptimize(encoded_data);
+        auto result = codec_->encode32(original_data, initial_prev_snapshot, workspace_);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_data.size() * sizeof(float));
     state.SetLabel("Snapshots: " + std::to_string(state.range(0)));
@@ -101,12 +119,21 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Encode32)(benchmark::State& state) {
 BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Decode32)(benchmark::State& state) {
     const size_t num_snapshots = state.range(0);
     cryptodd::OrderbookSimdCodecWorkspace workspace; // Create a workspace for the one-time encoding.
-    std::vector<uint8_t> encoded_data = codec_->encode32(original_data, initial_prev_snapshot, workspace);
+    auto encode_result = codec_->encode32(original_data, initial_prev_snapshot, workspace);
+    if (!encode_result) {
+        state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
+        return;
+    }
+    const std::vector<std::byte> encoded_data = std::move(*encode_result);
 
     for (auto _ : state) {
         cryptodd::OkxObSimdCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;
-        std::vector<float> decoded_data = codec_->decode32(encoded_data, num_snapshots, decoder_prev_snapshot);
-        benchmark::DoNotOptimize(decoded_data);
+        auto result = codec_->decode32(encoded_data, num_snapshots, decoder_prev_snapshot);
+        if (!result) {
+            state.SkipWithError(result.error().c_str());
+            return;
+        }
+        benchmark::DoNotOptimize(std::move(*result));
     }
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * original_data.size() * sizeof(float));
     state.SetLabel("Snapshots: " + std::to_string(state.range(0)));
