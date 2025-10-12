@@ -32,7 +32,7 @@ public:
     virtual std::expected<void, std::string> rewind() = 0;
 
     /** @return The total size of the storage on success. */
-    [[nodiscard]] virtual std::expected<uint64_t, std::string> size() const = 0;
+    [[nodiscard]] virtual std::expected<uint64_t, std::string> size() = 0;
 };
 
 } // namespace cryptodd::storage

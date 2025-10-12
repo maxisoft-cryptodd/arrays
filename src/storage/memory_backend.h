@@ -19,7 +19,7 @@ public:
     std::expected<uint64_t, std::string> tell() override;
     std::expected<void, std::string> flush() override;
     std::expected<void, std::string> rewind() override;
-    [[nodiscard]] std::expected<uint64_t, std::string> size() const override;
+    [[nodiscard]] std::expected<uint64_t, std::string> size() override;
 };
 
 } // namespace cryptodd::storage

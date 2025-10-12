@@ -51,6 +51,7 @@ add_library(cryptodd_arrays_lib STATIC
         src/storage/file_backend.cpp
         src/storage/memory_backend.cpp
         src/data_io/buffer.cpp
+        src/storage/mio_backend.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
@@ -91,6 +92,7 @@ find_package(lz4 CONFIG REQUIRED)
 find_package(blake3 CONFIG REQUIRED)
 find_package(stduuid CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
+find_package(mio CONFIG REQUIRED)
 
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
@@ -105,6 +107,7 @@ target_link_libraries(cryptodd_arrays_lib PUBLIC
         BLAKE3::blake3
         stduuid
         hwy::hwy
+        mio::mio mio::mio-headers
 )
 
 # Link the executable to the library
@@ -116,7 +119,9 @@ add_executable(cryptodd_arrays_test
         test/cdd_file_tests.cpp
         test/codecs/orderbook_simd_codec_test.cpp
         test/codecs/temporal_1d_simd_codec_test.cpp
-        test/codecs/temporal_2d_simd_codec_test.cpp)
+        test/codecs/temporal_2d_simd_codec_test.cpp
+        test/storage/storage_backend_tests.cpp
+        test/test_helpers.cpp)
 target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
 
 include(GoogleTest)

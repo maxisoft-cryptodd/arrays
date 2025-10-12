@@ -15,7 +15,7 @@ private:
     std::filesystem::path filepath_;
 
 public:
-    explicit FileBackend(const std::filesystem::path& filepath,
+    explicit FileBackend(std::filesystem::path filepath,
                          std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out | std::ios_base::binary);
 
     ~FileBackend() override;
@@ -26,7 +26,7 @@ public:
     std::expected<uint64_t, std::string> tell() override;
     std::expected<void, std::string> flush() override;
     std::expected<void, std::string> rewind() override;
-    [[nodiscard]] std::expected<uint64_t, std::string> size() const override;
+    [[nodiscard]] std::expected<uint64_t, std::string> size() override;
 };
 
 } // namespace cryptodd::storage
