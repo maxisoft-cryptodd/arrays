@@ -1,0 +1,7 @@
+{
+  "name": "python3",
+  "version-string": "empty",
+  "port-version": 0,
+  "description": "Empty overlay port to let system Python provision the package",
+  "dependencies": []
+}
