@@ -38,11 +38,11 @@ class OrderbookSimdCodecWorkspace;
 
 namespace detail {
     // Forward declare implementation functions that need privileged access to the workspace.
-    inline std::expected<std::vector<std::byte>, std::string> encode16_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
+    inline std::expected<memory::vector<std::byte>, std::string> encode16_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
                                               size_t num_snapshots, size_t snapshot_floats, ICompressor& compressor,
                                               OrderbookSimdCodecWorkspace& workspace);
 
-    inline std::expected<std::vector<std::byte>, std::string> encode32_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
+    inline std::expected<memory::vector<std::byte>, std::string> encode32_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
                                               size_t num_snapshots, size_t snapshot_floats, ICompressor& compressor,
                                               OrderbookSimdCodecWorkspace& workspace);
 }// namespace detail
@@ -128,8 +128,8 @@ public:
 private:
     // Grant access to our internal implementation functions. They need the raw
     // hwy::AlignedFreeUniquePtr to guarantee the alignment contract for SIMD operations.
-    friend std::expected<std::vector<std::byte>, std::string> detail::encode16_impl(std::span<const float>, std::span<const float>, size_t, size_t, ICompressor&, OrderbookSimdCodecWorkspace&);
-    friend std::expected<std::vector<std::byte>, std::string> detail::encode32_impl(std::span<const float>, std::span<const float>, size_t, size_t, ICompressor&, OrderbookSimdCodecWorkspace&);
+    friend std::expected<memory::vector<std::byte>, std::string> detail::encode16_impl(std::span<const float>, std::span<const float>, size_t, size_t, ICompressor&, OrderbookSimdCodecWorkspace&);
+    friend std::expected<memory::vector<std::byte>, std::string> detail::encode32_impl(std::span<const float>, std::span<const float>, size_t, size_t, ICompressor&, OrderbookSimdCodecWorkspace&);
 
     hwy::AlignedFreeUniquePtr<hwy::float16_t[]> f16_deltas_;
     hwy::AlignedFreeUniquePtr<float[]> f32_deltas_;
@@ -139,7 +139,7 @@ private:
 
 namespace detail {
 
-inline std::expected<std::vector<std::byte>, std::string> encode16_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
+inline std::expected<memory::vector<std::byte>, std::string> encode16_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
                                           size_t num_snapshots, size_t snapshot_floats, ICompressor& compressor,
                                           OrderbookSimdCodecWorkspace& workspace) {
     const size_t num_floats = snapshots.size();
@@ -163,7 +163,7 @@ inline std::expected<std::vector<std::byte>, std::string> encode16_impl(std::spa
     return compressor.compress(data_to_compress);
 }
 
-inline std::expected<std::vector<std::byte>, std::string> encode32_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
+inline std::expected<memory::vector<std::byte>, std::string> encode32_impl(std::span<const float> snapshots, std::span<const float> prev_snapshot,
                                           size_t num_snapshots, size_t snapshot_floats, ICompressor& compressor,
                                           OrderbookSimdCodecWorkspace& workspace) {
     const size_t num_floats = snapshots.size();
@@ -206,10 +206,10 @@ public:
     DynamicOrderbookSimdCodec(const DynamicOrderbookSimdCodec&) = delete;
     DynamicOrderbookSimdCodec& operator=(const DynamicOrderbookSimdCodec&) = delete;
 
-    std::expected<std::vector<std::byte>, std::string> encode16(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
+    std::expected<memory::vector<std::byte>, std::string> encode16(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
     std::expected<std::vector<float>, std::string> decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const;
 
-    std::expected<std::vector<std::byte>, std::string> encode32(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
+    std::expected<memory::vector<std::byte>, std::string> encode32(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
     std::expected<std::vector<float>, std::string> decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const;
 
     [[nodiscard]] std::pair<size_t, size_t> get_depth_features_count() const
@@ -230,7 +230,7 @@ private:
     std::unique_ptr<ICompressor> compressor_;
 };
 
-inline std::expected<std::vector<std::byte>, std::string> DynamicOrderbookSimdCodec::encode16(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const {
+inline std::expected<memory::vector<std::byte>, std::string> DynamicOrderbookSimdCodec::encode16(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const {
     if (prev_snapshot.size() != snapshot_floats_) {
         throw std::runtime_error("prev_snapshot size does not match configured snapshot_floats.");
     }
@@ -267,7 +267,7 @@ inline std::expected<std::vector<float>, std::string> DynamicOrderbookSimdCodec:
     return final_output;
 }
 
-inline std::expected<std::vector<std::byte>, std::string> DynamicOrderbookSimdCodec::encode32(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const {
+inline std::expected<memory::vector<std::byte>, std::string> DynamicOrderbookSimdCodec::encode32(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const {
     if (prev_snapshot.size() != snapshot_floats_) {
         throw std::runtime_error("prev_snapshot size does not match configured snapshot_floats.");
     }
@@ -327,10 +327,10 @@ public:
     OrderbookSimdCodec(const OrderbookSimdCodec&) = delete;
     OrderbookSimdCodec& operator=(const OrderbookSimdCodec&) = delete;
 
-    std::expected<std::vector<std::byte>, std::string> encode16(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
+    std::expected<memory::vector<std::byte>, std::string> encode16(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
     std::expected<std::vector<float>, std::string> decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const;
 
-    std::expected<std::vector<std::byte>, std::string> encode32(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
+    std::expected<memory::vector<std::byte>, std::string> encode32(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
     std::expected<std::vector<float>, std::string> decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const;
 
 private:
@@ -338,7 +338,7 @@ private:
 };
 
 template <size_t Depth, size_t Features>
-std::expected<std::vector<std::byte>, std::string> OrderbookSimdCodec<Depth, Features>::encode16(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const {
+std::expected<memory::vector<std::byte>, std::string> OrderbookSimdCodec<Depth, Features>::encode16(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const {
     const size_t num_floats = snapshots.size();
     if (num_floats == 0 || num_floats % SnapshotFloats != 0) {
         throw std::runtime_error("Snapshot data size is not a multiple of the configured SnapshotFloats.");
@@ -371,7 +371,7 @@ std::expected<std::vector<float>, std::string> OrderbookSimdCodec<Depth, Feature
 }
 
 template <size_t Depth, size_t Features>
-std::expected<std::vector<std::byte>, std::string> OrderbookSimdCodec<Depth, Features>::encode32(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const {
+std::expected<memory::vector<std::byte>, std::string> OrderbookSimdCodec<Depth, Features>::encode32(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const {
     const size_t num_floats = snapshots.size();
     if (num_floats == 0 || num_floats % SnapshotFloats != 0) {
         throw std::runtime_error("Snapshot data size is not a multiple of the configured SnapshotFloats.");

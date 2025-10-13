@@ -294,7 +294,7 @@ TEST_F(CddFileTest, MemoryBackendTest) {
     ASSERT_TRUE(size_res.has_value()) << size_res.error();
     ASSERT_EQ(*size_res, 1024);
 
-    std::vector<std::byte> read_data(1024);
+    memory::vector<std::byte> read_data(1024);
     ASSERT_TRUE(mem_backend.seek(0).has_value());
     auto read_res = mem_backend.read(read_data);
     ASSERT_TRUE(read_res.has_value()) << read_res.error();
@@ -372,12 +372,14 @@ class CddChunkOffsetChainingTest : public CddFileTest,
 };
 
 TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
+
+    using cryptodd::memory::vector;
     const auto& params = GetParam();
     const size_t capacity = params.capacity;
     const size_t num_extra_chunks = params.num_extra_chunks;
     const size_t total_chunks = capacity + num_extra_chunks;
 
-    std::vector<std::vector<std::byte>> original_data_chunks;
+    vector<vector<std::byte>> original_data_chunks;
     original_data_chunks.reserve(total_chunks);
 
     // --- Test with FileBackend ---

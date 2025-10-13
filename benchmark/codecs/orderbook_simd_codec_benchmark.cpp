@@ -21,6 +21,7 @@ static std::vector<float> generate_random_snapshots(size_t num_snapshots) {
 class OkxObSimdCodecBenchmark : public benchmark::Fixture {
 public:
     void SetUp(const ::benchmark::State& state) override {
+
         const size_t num_snapshots = state.range(0);
         original_data = generate_random_snapshots(num_snapshots);
 
@@ -73,7 +74,7 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Decode16)(benchmark::State& state) {
         state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
         return;
     }
-    const std::vector<std::byte> encoded_data = std::move(*encode_result);
+    const cryptodd::memory::vector<std::byte> encoded_data = std::move(*encode_result);
 
     for (auto _ : state) {
         // The decoder modifies its previous snapshot state, so we must reset it for each run.
@@ -124,7 +125,7 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Decode32)(benchmark::State& state) {
         state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
         return;
     }
-    const std::vector<std::byte> encoded_data = std::move(*encode_result);
+    const cryptodd::memory::vector<std::byte> encoded_data = std::move(*encode_result);
 
     for (auto _ : state) {
         cryptodd::OkxObSimdCodec::Snapshot decoder_prev_snapshot = initial_prev_snapshot;

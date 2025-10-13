@@ -61,19 +61,19 @@ public:
     }
 
     // Chain: float32 -> demote to float16 -> XOR -> shuffle
-    std::expected<std::vector<std::byte>, std::string> encode16_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
+    std::expected<memory::vector<std::byte>, std::string> encode16_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
     std::expected<std::vector<float>, std::string> decode16_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const;
 
     // Chain: float32 -> XOR -> shuffle
-    std::expected<std::vector<std::byte>, std::string> encode32_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
+    std::expected<memory::vector<std::byte>, std::string> encode32_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
     std::expected<std::vector<float>, std::string> decode32_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const;
 
     // Chain: int64 -> XOR
-    std::expected<std::vector<std::byte>, std::string> encode64_Xor(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
+    std::expected<memory::vector<std::byte>, std::string> encode64_Xor(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
     std::expected<std::vector<int64_t>, std::string> decode64_Xor(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const;
 
     // Chain: int64 -> delta (subtraction)
-    std::expected<std::vector<std::byte>, std::string> encode64_Delta(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
+    std::expected<memory::vector<std::byte>, std::string> encode64_Delta(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
     std::expected<std::vector<int64_t>, std::string> decode64_Delta(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const;
 
 private:
@@ -82,7 +82,7 @@ private:
 
 // --- Implementation for Temporal1dSimdCodec ---
 
-inline std::expected<std::vector<std::byte>, std::string> Temporal1dSimdCodec::encode16_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
+inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec::encode16_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
     workspace.ensure_capacity(data.size());
     auto* f16_deltas = reinterpret_cast<hwy::float16_t*>(workspace.buffer1().get());
     simd::DemoteAndXor1D_dispatcher(data.data(), f16_deltas, data.size(), prev_element);
@@ -105,7 +105,7 @@ inline std::expected<std::vector<float>, std::string> Temporal1dSimdCodec::decod
     return out_data;
 }
 
-inline std::expected<std::vector<std::byte>, std::string> Temporal1dSimdCodec::encode32_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
+inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec::encode32_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
     workspace.ensure_capacity(data.size());
     auto* f32_deltas = reinterpret_cast<float*>(workspace.buffer1().get());
     simd::XorFloat32_1D_dispatcher(data.data(), f32_deltas, data.size(), prev_element);
@@ -128,7 +128,7 @@ inline std::expected<std::vector<float>, std::string> Temporal1dSimdCodec::decod
     return out_data;
 }
 
-inline std::expected<std::vector<std::byte>, std::string> Temporal1dSimdCodec::encode64_Xor(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
+inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec::encode64_Xor(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
     workspace.ensure_capacity(data.size());
     auto* i64_deltas = reinterpret_cast<int64_t*>(workspace.buffer1().get());
     simd::XorInt64_1D_dispatcher(data.data(), i64_deltas, data.size(), prev_element);
@@ -146,7 +146,7 @@ inline std::expected<std::vector<int64_t>, std::string> Temporal1dSimdCodec::dec
     return out_data;
 }
 
-inline std::expected<std::vector<std::byte>, std::string> Temporal1dSimdCodec::encode64_Delta(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
+inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec::encode64_Delta(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const {
     workspace.ensure_capacity(data.size());
     auto* i64_deltas = reinterpret_cast<int64_t*>(workspace.buffer1().get());
     simd::DeltaInt64_1D_dispatcher(data.data(), i64_deltas, data.size(), prev_element);

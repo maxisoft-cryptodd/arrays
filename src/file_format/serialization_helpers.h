@@ -6,6 +6,7 @@
 #include <string>
 #include <format>
 
+#include "../memory/allocator.h"
 #include "../storage/i_storage_backend.h"
 
 namespace cryptodd::serialization {
@@ -96,12 +97,12 @@ inline std::expected<size_t, std::string> write_blob(storage::IStorageBackend& b
 }
 
 // Reads a byte vector (blob) with a length prefix
-inline std::expected<std::vector<std::byte>, std::string> read_blob(storage::IStorageBackend& backend) {
+inline std::expected<memory::vector<std::byte>, std::string> read_blob(storage::IStorageBackend& backend) {
     auto size_result = read_pod<uint32_t>(backend);
     if (!size_result) {
         return std::unexpected(size_result.error());
     }
-    std::vector<std::byte> blob(*size_result);
+    memory::vector<std::byte> blob(*size_result);
     if (*size_result > 0) {
         auto read_result = backend.read(blob);
         if (!read_result) {

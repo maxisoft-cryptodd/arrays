@@ -111,8 +111,8 @@ std::expected<void, std::string> MioBackend::remap(uint64_t required_size) {
 
 std::expected<size_t, std::string> MioBackend::read(std::span<std::byte> buffer) {
     return std::visit(
-        [this, buffer](auto& map) -> std::expected<size_t, std::string> {
-            using T = std::decay_t<decltype(map)>;
+        [this, buffer]<typename T0>(T0& map) -> std::expected<size_t, std::string> {
+            using T = std::decay_t<T0>;
             if constexpr (std::is_same_v<T, std::monostate>) {
                 return 0;
             } else {
@@ -151,7 +151,7 @@ std::expected<size_t, std::string> MioBackend::write(std::span<const std::byte> 
 
     // After remapping, the sink is guaranteed to exist and be large enough.
     auto& sink = std::get<Impl::mmap_sink>(pimpl_->mapping);
-    std::copy(data.begin(), data.end(), sink.data() + current_pos_);
+    std::ranges::copy(data, sink.data() + current_pos_);
     current_pos_ += data.size();
 
     // Update the logical size after a successful write.

@@ -11,14 +11,14 @@
 namespace cryptodd
 {
 
-using vect_variant = std::variant<std::vector<uint8_t>, std::vector<float>, std::vector<int64_t>, std::vector<std::byte>>;
+using vect_variant = std::variant<std::vector<uint8_t>, std::vector<float>, std::vector<int64_t>, std::vector<std::byte>, memory::vector<std::byte>>;
 
 class Buffer
 {
     vect_variant m_data;
 
   public:
-    Buffer() : m_data(std::vector<std::byte>())
+    Buffer() : m_data(memory::vector<std::byte>())
     {
     }
 
@@ -33,7 +33,7 @@ class Buffer
     explicit Buffer(std::vector<int64_t> &&data) : m_data(std::move(data))
     {
     }
-    explicit Buffer(std::vector<std::byte> &&data) : m_data(std::move(data)) {}
+    explicit Buffer(memory::vector<std::byte> &&data) : m_data(std::move(data)) {}
 
     Buffer(const Buffer &other) = delete;
     Buffer &operator=(const Buffer &other) = delete;
@@ -98,17 +98,18 @@ class Buffer
     [[nodiscard]] DType dtype() const
     {
         return std::visit(
-            []<typename T0>(const T0& vec) -> DType
-            {
+            []<typename T0>(const T0 &vec) -> DType {
                 using T = std::decay_t<T0>::value_type;
                 if constexpr (std::is_same_v<T, float>)
                     return DType::FLOAT32;
                 else if constexpr (std::is_same_v<T, uint8_t>)
                     return DType::UINT8;
                 else if constexpr (std::is_same_v<T, int64_t>)
-                    return DType::INT64; // NOLINT
-                else
-                    return DType::UINT8; // Default case for std::byte
+                    return DType::INT64;
+                else if constexpr (std::is_same_v<T, std::byte>)
+                    return DType::UINT8;
+
+                std::unreachable();
             },
             m_data);
     }
