@@ -77,6 +77,7 @@ target_include_directories(cryptodd_arrays_lib PUBLIC
     "${CMAKE_SOURCE_DIR}/src/file_format"
     "${CMAKE_SOURCE_DIR}/src/data_io"
     "${CMAKE_SOURCE_DIR}/src/codecs"
+        "${CMAKE_SOURCE_DIR}/src/memory"
 )
 
 target_include_directories(cryptodd_arrays_shared PUBLIC
@@ -93,6 +94,7 @@ find_package(blake3 CONFIG REQUIRED)
 find_package(stduuid CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
 find_package(mio CONFIG REQUIRED)
+find_package(mimalloc CONFIG REQUIRED)
 
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
@@ -108,6 +110,7 @@ target_link_libraries(cryptodd_arrays_lib PUBLIC
         stduuid
         hwy::hwy
         mio::mio mio::mio-headers
+        mimalloc-static
 )
 
 # Link the executable to the library

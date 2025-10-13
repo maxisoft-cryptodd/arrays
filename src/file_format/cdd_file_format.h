@@ -9,6 +9,7 @@
 #include <span>
 
 #include "../storage/i_storage_backend.h"
+#include "../memory/allocator.h"
 #include "blake3_stream_hasher.h"
 
 namespace cryptodd {
@@ -98,13 +99,13 @@ class FileHeader {
 public:
     [[nodiscard]] uint32_t magic() const { return magic_; }
     [[nodiscard]] uint16_t version() const { return version_; }
-    [[nodiscard]] const std::vector<std::byte>& internal_metadata() const { return internal_metadata_; }
-    [[nodiscard]] const std::vector<std::byte>& user_metadata() const { return user_metadata_; }
+    [[nodiscard]] const memory::vector<std::byte>& internal_metadata() const { return internal_metadata_; }
+    [[nodiscard]] const memory::vector<std::byte>& user_metadata() const { return user_metadata_; }
     
     /** @brief Sets the internal metadata, taking ownership of the provided vector. */
-    void set_internal_metadata(std::vector<std::byte> metadata) { internal_metadata_ = std::move(metadata); }
+    void set_internal_metadata(memory::vector<std::byte> metadata) { internal_metadata_ = std::move(metadata); }
     /** @brief Sets the user-defined metadata, taking ownership of the provided vector. */
-    void set_user_metadata(std::vector<std::byte> metadata) { user_metadata_ = std::move(metadata); }
+    void set_user_metadata(memory::vector<std::byte> metadata) { user_metadata_ = std::move(metadata); }
 
     std::expected<void, std::string> write(IStorageBackend& backend) const;
     std::expected<void, std::string> read(IStorageBackend& backend);
@@ -112,8 +113,8 @@ public:
 private:
     uint32_t magic_ = CDD_MAGIC;
     uint16_t version_ = CDD_VERSION;
-    std::vector<std::byte> internal_metadata_;
-    std::vector<std::byte> user_metadata_;
+    memory::vector<std::byte> internal_metadata_;
+    memory::vector<std::byte> user_metadata_;
 };
 
 /**
@@ -178,9 +179,9 @@ public:
     [[nodiscard]] const blake3_hash128_t& hash() const { return hash_; }
     [[nodiscard]] uint64_t flags() const { return flags_; }
     [[nodiscard]] const std::vector<uint32_t>& shape() const { return shape_; }
-    [[nodiscard]] const std::vector<std::byte>& data() const { return data_; }
+    [[nodiscard]] const memory::vector<std::byte>& data() const { return data_; }
     /** @brief Gets a mutable reference to the chunk's data vector. */
-    [[nodiscard]] std::vector<std::byte>& data() { return data_; }
+    [[nodiscard]] memory::vector<std::byte>& data() { return data_; }
 
     // Setters
     void set_size(uint32_t size) { size_ = size; }
@@ -190,7 +191,7 @@ public:
     void set_flags(uint64_t flags) { flags_ = flags; }
     void set_shape(std::vector<uint32_t> shape) { shape_ = std::move(shape); }
     /** @brief Sets the chunk's data, taking ownership of the provided vector. */
-    void set_data(std::vector<std::byte> data) { data_ = std::move(data); }
+    void set_data(memory::vector<std::byte> data) { data_ = std::move(data); }
 
     std::expected<void, std::string> write(IStorageBackend& backend) const;
     std::expected<void, std::string> read(IStorageBackend& backend);
@@ -202,7 +203,7 @@ private:
     blake3_hash128_t hash_{};
     uint64_t flags_{};
     std::vector<uint32_t> shape_;
-    std::vector<std::byte> data_;
+    memory::vector<std::byte> data_;
 };
 
 } // namespace cryptodd

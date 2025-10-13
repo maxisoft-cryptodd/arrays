@@ -7,12 +7,12 @@
 
 #include <stduuid/uuid.h>
 
-std::vector<std::byte> generate_random_data(size_t size) {
+cryptodd::memory::vector<std::byte> generate_random_data(size_t size) {
     static std::random_device rd;
     static std::mt19937 gen(rd());
     static std::uniform_int_distribution<> distrib(0, 255);
 
-    std::vector<std::byte> data(size);
+    cryptodd::memory::vector<std::byte> data(size);
     std::ranges::generate(data, [&]() {
         return static_cast<std::byte>(distrib(gen));
     });

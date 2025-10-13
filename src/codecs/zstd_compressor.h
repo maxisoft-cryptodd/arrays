@@ -22,8 +22,8 @@ public:
     ZstdCompressor& operator=(ZstdCompressor&&) noexcept;
 
     // --- Interface Implementation ---
-    std::expected<std::vector<std::byte>, std::string> compress(std::span<const std::byte> uncompressed_data) override;
-    std::expected<std::vector<std::byte>, std::string> decompress(std::span<const std::byte> compressed_data) override;
+    std::expected<memory::vector<std::byte>, std::string> compress(std::span<const std::byte> uncompressed_data) override;
+    std::expected<memory::vector<std::byte>, std::string> decompress(std::span<const std::byte> compressed_data) override;
 
     void set_level(int level);
 

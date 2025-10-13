@@ -222,7 +222,7 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
         }
     }
 
-    std::vector<std::byte> processed_data;
+    memory::vector<std::byte> processed_data;
     if (type == ChunkDataType::ZSTD_COMPRESSED) {
         auto compress_res = get_zstd_compressor().compress(data);
         if (!compress_res) return std::unexpected("Zstd compression failed: " + compress_res.error());

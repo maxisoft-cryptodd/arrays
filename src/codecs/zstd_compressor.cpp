@@ -65,10 +65,10 @@ ZstdCompressor::~ZstdCompressor() = default;
 ZstdCompressor::ZstdCompressor(ZstdCompressor&&) noexcept = default;
 ZstdCompressor& ZstdCompressor::operator=(ZstdCompressor&&) noexcept = default;
 
-std::expected<std::vector<std::byte>, std::string> ZstdCompressor::compress(std::span<const std::byte> uncompressed_data)
+std::expected<memory::vector<std::byte>, std::string> ZstdCompressor::compress(std::span<const std::byte> uncompressed_data)
 {
     const size_t compressed_bound = ZSTD_compressBound(uncompressed_data.size());
-    std::vector<std::byte> compressed_data(compressed_bound);
+    memory::vector<std::byte> compressed_data(compressed_bound);
 
     const size_t compressed_size = pimpl_->cdict
         ? ZSTD_compress_usingCDict(pimpl_->cctx.get(), compressed_data.data(), compressed_data.size(),
@@ -84,7 +84,7 @@ std::expected<std::vector<std::byte>, std::string> ZstdCompressor::compress(std:
     return compressed_data;
 }
 
-std::expected<std::vector<std::byte>, std::string> ZstdCompressor::decompress(std::span<const std::byte> compressed_data)
+std::expected<memory::vector<std::byte>, std::string> ZstdCompressor::decompress(std::span<const std::byte> compressed_data)
 {
     const unsigned long long decompressed_size =
         ZSTD_getFrameContentSize(compressed_data.data(), compressed_data.size());
@@ -98,7 +98,7 @@ std::expected<std::vector<std::byte>, std::string> ZstdCompressor::decompress(st
         return std::unexpected("Cannot decompress ZSTD frame with unknown content size.");
     }
 
-    std::vector<std::byte> decompressed_data(decompressed_size);
+    memory::vector<std::byte> decompressed_data(decompressed_size);
 
     const size_t result_size = pimpl_->ddict
         ? ZSTD_decompress_usingDDict(pimpl_->dctx.get(), decompressed_data.data(), decompressed_data.size(),

@@ -59,7 +59,7 @@ public:
     std::expected<Chunk, std::string> get_chunk(size_t index);
 
     // Retrieves a slice of chunks, returning a vector of raw data buffers. Returns an error on failure.
-    std::expected<std::vector<std::vector<std::byte>>, std::string> get_chunk_slice(size_t start_index, size_t end_index);
+    std::expected<memory::vector<memory::vector<std::byte>>, std::string> get_chunk_slice(size_t start_index, size_t end_index);
 };
 
 } // namespace cryptodd

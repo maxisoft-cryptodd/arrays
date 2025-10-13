@@ -75,7 +75,7 @@ BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Decode16)(benchmark::State& sta
         state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
         return;
     }
-    const std::vector<std::byte> encoded = std::move(*encode_result);
+    const cryptodd::memory::vector<std::byte> encoded = std::move(*encode_result);
 
     for (auto _ : state) {
         auto decoder_prev_row = initial_prev_row_float;
@@ -109,7 +109,7 @@ BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Decode32)(benchmark::State& sta
         state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
         return;
     }
-    const std::vector<std::byte> encoded = std::move(*encode_result);
+    const cryptodd::memory::vector<std::byte> encoded = std::move(*encode_result);
 
     for (auto _ : state) {
         auto decoder_prev_row = initial_prev_row_float;
@@ -143,7 +143,7 @@ BENCHMARK_DEFINE_F(Temporal2dSimdCodecBenchmark, Decode64)(benchmark::State& sta
         state.SkipWithError(("Setup for decode failed during encode: " + encode_result.error()).c_str());
         return;
     }
-    const std::vector<std::byte> encoded = std::move(*encode_result);
+    const cryptodd::memory::vector<std::byte> encoded = std::move(*encode_result);
 
     for (auto _ : state) {
         auto decoder_prev_row = initial_prev_row_int64;

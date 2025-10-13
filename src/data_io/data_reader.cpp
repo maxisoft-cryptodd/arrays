@@ -156,7 +156,7 @@ std::expected<Chunk, std::string> DataReader::get_chunk(const size_t index) {
     return chunk;
 }
 
-std::expected<std::vector<std::vector<std::byte>>, std::string> DataReader::get_chunk_slice(size_t start_index, size_t end_index) {
+std::expected<memory::vector<memory::vector<std::byte>>, std::string> DataReader::get_chunk_slice(size_t start_index, size_t end_index) {
     if (start_index >= master_chunk_offsets_.size() || start_index > end_index) {
         return std::unexpected("Invalid slice indices for get_chunk_slice.");
     }
@@ -164,7 +164,7 @@ std::expected<std::vector<std::vector<std::byte>>, std::string> DataReader::get_
         end_index = master_chunk_offsets_.size() - 1;
     }
 
-    std::vector<std::vector<std::byte>> slice_data;
+    memory::vector<memory::vector<std::byte>> slice_data;
     for (size_t i = start_index; i <= end_index; ++i) {
         auto chunk_result = get_chunk(i);
         if (!chunk_result) {

@@ -76,7 +76,7 @@ TEST_P(StorageBackendTest, SimpleWriteAndRead) {
 
     ASSERT_TRUE(backend_->rewind().has_value());
 
-    std::vector<std::byte> read_data(original_data.size());
+    cryptodd::memory::vector<std::byte> read_data(original_data.size());
     auto read_res = backend_->read(read_data);
     ASSERT_TRUE(read_res.has_value()) << read_res.error();
     EXPECT_EQ(*read_res, original_data.size());
@@ -101,11 +101,11 @@ TEST_P(StorageBackendTest, Overwrite) {
     EXPECT_EQ(*size_res, initial_data.size());
 
     // Construct the expected final state
-    std::vector<std::byte> expected_data = initial_data;
+    cryptodd::memory::vector<std::byte> expected_data = initial_data;
     std::copy(overwrite_data.begin(), overwrite_data.end(), expected_data.begin() + overwrite_offset);
 
     // Read back the entire content and verify
-    std::vector<std::byte> actual_data(expected_data.size());
+    cryptodd::memory::vector<std::byte> actual_data(expected_data.size());
     ASSERT_TRUE(backend_->rewind().has_value());
     auto read_res = backend_->read(actual_data);
     ASSERT_TRUE(read_res.has_value()) << read_res.error();
@@ -131,7 +131,7 @@ TEST_P(StorageBackendTest, WritePastEnd) {
     EXPECT_EQ(*size_res, expected_size);
 
     // Read back the appended data
-    std::vector<std::byte> read_back_data(append_data.size());
+    cryptodd::memory::vector<std::byte> read_back_data(append_data.size());
     ASSERT_TRUE(backend_->seek(seek_pos).has_value());
     auto read_res = backend_->read(read_back_data);
     ASSERT_TRUE(read_res.has_value()) << read_res.error();
@@ -140,7 +140,7 @@ TEST_P(StorageBackendTest, WritePastEnd) {
 
     // Check that the gap is zero-filled (for file-based backends)
     if (GetParam() != "MemoryBackend") {
-        std::vector<std::byte> gap_data(10);
+        cryptodd::memory::vector<std::byte> gap_data(10);
         ASSERT_TRUE(backend_->seek(150).has_value());
         ASSERT_TRUE(backend_->read(gap_data).has_value());
         for(const auto& b : gap_data) {
@@ -188,7 +188,7 @@ TEST_P(StorageBackendTest, ReadOnlyMode) {
     }
 
     // Reading should succeed
-    std::vector<std::byte> read_data(data.size());
+    cryptodd::memory::vector<std::byte> read_data(data.size());
     auto read_res = reader_backend->read(read_data);
     ASSERT_TRUE(read_res.has_value()) << read_res.error();
     EXPECT_EQ(*read_res, data.size());
