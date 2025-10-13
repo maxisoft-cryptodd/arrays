@@ -3,7 +3,7 @@
 #include <array>
 #include <span>
 #include <stdexcept>
-#include <vector>
+#include "../memory/allocator.h"
 #include <memory>
 
 namespace cryptodd {
@@ -44,9 +44,9 @@ public:
     /**
      * @brief Finalizes the hash and returns a byte vector of a specified length.
      * @param out_len The desired output length in bytes.
-     * @return A std::vector<std::byte> containing the hash.
+     * @return A cryptodd::memory::vector<std::byte> containing the hash.
      */
-    [[nodiscard]] std::vector<std::byte> finalize(size_t out_len) const;
+    [[nodiscard]] memory::vector<std::byte> finalize(size_t out_len) const;
 
     /**
      * @brief Finalizes the hash and returns a 128-bit (16-byte) hash.

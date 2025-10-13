@@ -79,8 +79,8 @@ TEST_F(CddFileTest, WriteAndReadEmptyFile) {
 
 TEST_F(CddFileTest, WriteAndReadSingleChunk) {
     auto original_data = generate_random_data(1024);
-    std::vector<uint32_t> shape = {32, 32, 0}; // 32x32 array, null-terminated
-    const std::vector<std::byte> user_meta = {
+    memory::vector<uint32_t> shape = {32, 32, 0}; // 32x32 array, null-terminated
+    const memory::vector<std::byte> user_meta = {
         std::byte('u'), std::byte('s'), std::byte('e'), std::byte('r'),
         std::byte(' '), std::byte('m'), std::byte('e'), std::byte('t'), std::byte('a')
     };
@@ -118,8 +118,8 @@ TEST_F(CddFileTest, WriteAndReadSingleChunk) {
 TEST_F(CddFileTest, WriteAndReadMultipleChunksSingleBlock) {
     auto data1 = generate_random_data(512);
     auto data2 = generate_random_data(2048);
-    std::vector<uint32_t> shape1 = {16, 32, 0};
-    std::vector<uint32_t> shape2 = {64, 32, 0};
+    memory::vector<uint32_t> shape1 = {16, 32, 0};
+    memory::vector<uint32_t> shape2 = {64, 32, 0};
 
     // Write
     {
@@ -152,9 +152,9 @@ TEST_F(CddFileTest, WriteAndReadMultipleChunksMultipleBlocks) {
     auto data1 = generate_random_data(512);
     auto data2 = generate_random_data(2048);
     auto data3 = generate_random_data(100);
-    std::vector<uint32_t> shape1 = {16, 32, 0}; // 16*32 = 512
-    std::vector<uint32_t> shape2 = {32, 64, 0}; // 32*64 = 2048
-    std::vector<uint32_t> shape3 = {10, 10, 0}; // 10*10 = 100
+    memory::vector<uint32_t> shape1 = {16, 32, 0}; // 16*32 = 512
+    memory::vector<uint32_t> shape2 = {32, 64, 0}; // 32*64 = 2048
+    memory::vector<uint32_t> shape3 = {10, 10, 0}; // 10*10 = 100
 
     // Write
     {
@@ -191,7 +191,7 @@ TEST_F(CddFileTest, WriteAndReadMultipleChunksMultipleBlocks) {
 
 TEST_F(CddFileTest, AppendToExistingFile) {
     auto data1 = generate_random_data(512);
-    std::vector<uint32_t> shape1 = {16, 32, 0}; // 16*32 = 512
+    memory::vector<uint32_t> shape1 = {16, 32, 0}; // 16*32 = 512
 
     // Create file with one chunk
     {
@@ -204,7 +204,7 @@ TEST_F(CddFileTest, AppendToExistingFile) {
 
     // Append a new chunk
     auto data2 = generate_random_data(1024);
-    std::vector<uint32_t> shape2 = {32, 32, 0}; // 32*32 = 1024
+    memory::vector<uint32_t> shape2 = {32, 32, 0}; // 32*32 = 1024
     {
         auto writer_result = DataWriter::open_for_append(test_filepath_); // Open for appending
         ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
@@ -235,10 +235,10 @@ TEST_F(CddFileTest, GetChunkSlice) {
     auto data2 = generate_random_data(200);
     auto data3 = generate_random_data(300);
     auto data4 = generate_random_data(400);
-    std::vector<uint32_t> shape1 = {10, 10, 0};   // 100 bytes
-    std::vector<uint32_t> shape2 = {10, 20, 0};   // 200 bytes
-    std::vector<uint32_t> shape3 = {15, 20, 0};   // 300 bytes
-    std::vector<uint32_t> shape4 = {20, 20, 0};   // 400 bytes
+    memory::vector<uint32_t> shape1 = {10, 10, 0};   // 100 bytes
+    memory::vector<uint32_t> shape2 = {10, 20, 0};   // 200 bytes
+    memory::vector<uint32_t> shape3 = {15, 20, 0};   // 300 bytes
+    memory::vector<uint32_t> shape4 = {20, 20, 0};   // 400 bytes
 
     // Write 4 chunks
     {
@@ -323,7 +323,7 @@ TEST_F(CddFileTest, MemoryBackendTest) {
 TEST_F(CddFileTest, InMemoryWriterToReader) {
     auto data1 = generate_random_data(100);
     auto data2 = generate_random_data(200);
-    std::vector<uint32_t> shape = {10, 10, 0};
+    memory::vector<uint32_t> shape = {10, 10, 0};
 
     std::unique_ptr<storage::IStorageBackend> mem_backend;
 
@@ -392,7 +392,7 @@ TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
             for (size_t i = 0; i < total_chunks; ++i) {
                 auto data = generate_random_data(10 + i); // Varying sizes
                 original_data_chunks.push_back(data);
-                std::vector<uint32_t> shape = {static_cast<uint32_t>(data.size()), 0};
+                vector<uint32_t> shape = {static_cast<uint32_t>(data.size()), 0};
                 ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data).has_value());
             }
             ASSERT_TRUE(writer->flush().has_value());
@@ -424,7 +424,7 @@ TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
             for (size_t i = 0; i < total_chunks; ++i) {
                 auto data = generate_random_data(10 + i);
                 original_data_chunks.push_back(data);
-                std::vector<uint32_t> shape = {static_cast<uint32_t>(data.size()), 0};
+                vector<uint32_t> shape = {static_cast<uint32_t>(data.size()), 0};
                 ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data).has_value());
             }
             ASSERT_TRUE(writer->flush().has_value());

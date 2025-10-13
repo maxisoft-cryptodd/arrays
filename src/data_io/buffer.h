@@ -7,11 +7,12 @@
 #include <span>
 
 #include "../file_format/cdd_file_format.h"
+#include "../memory/allocator.h"
 
 namespace cryptodd
 {
 
-using vect_variant = std::variant<std::vector<uint8_t>, std::vector<float>, std::vector<int64_t>, std::vector<std::byte>, memory::vector<std::byte>>;
+using vect_variant = std::variant<memory::vector<uint8_t>, memory::vector<float>, memory::vector<int64_t>, memory::vector<std::byte>>;
 
 class Buffer
 {
@@ -22,15 +23,15 @@ class Buffer
     {
     }
 
-    explicit Buffer(std::vector<uint8_t> &&data) : m_data(std::move(data))
+    explicit Buffer(memory::vector<uint8_t> &&data) : m_data(std::move(data))
     {
     }
 
-    explicit Buffer(std::vector<float> &&data) : m_data(std::move(data))
+    explicit Buffer(memory::vector<float> &&data) : m_data(std::move(data))
     {
     }
 
-    explicit Buffer(std::vector<int64_t> &&data) : m_data(std::move(data))
+    explicit Buffer(memory::vector<int64_t> &&data) : m_data(std::move(data))
     {
     }
     explicit Buffer(memory::vector<std::byte> &&data) : m_data(std::move(data)) {}

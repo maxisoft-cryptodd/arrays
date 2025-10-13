@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <cstddef>
-#include <vector>
 #include <string>
 #include <array>
 #include <expected>
@@ -141,8 +140,8 @@ public:
     [[nodiscard]] const blake3_hash128_t& hash() const { return hash_; }
     void set_hash(const blake3_hash128_t& hash) { hash_ = hash; }
 
-    [[nodiscard]] const std::vector<uint64_t>& offsets_and_pointer() const { return offsets_and_pointer_; }
-    void set_offsets_and_pointer(std::vector<uint64_t> offsets) { offsets_and_pointer_ = std::move(offsets); }
+    [[nodiscard]] const memory::vector<uint64_t>& offsets_and_pointer() const { return offsets_and_pointer_; }
+    void set_offsets_and_pointer(memory::vector<uint64_t> offsets) { offsets_and_pointer_ = std::move(offsets); }
 
     std::expected<void, std::string> write(IStorageBackend& backend) const;
     std::expected<void, std::string> read(IStorageBackend& backend);
@@ -151,7 +150,7 @@ private:
     uint32_t size_{};
     ChunkOffsetType type_{};
     blake3_hash128_t hash_{};
-    std::vector<uint64_t> offsets_and_pointer_;
+    memory::vector<uint64_t> offsets_and_pointer_;
 };
 
 /**
@@ -178,7 +177,7 @@ public:
     [[nodiscard]] DType dtype() const { return dtype_; }
     [[nodiscard]] const blake3_hash128_t& hash() const { return hash_; }
     [[nodiscard]] uint64_t flags() const { return flags_; }
-    [[nodiscard]] const std::vector<uint32_t>& shape() const { return shape_; }
+    [[nodiscard]] const memory::vector<uint32_t>& shape() const { return shape_; }
     [[nodiscard]] const memory::vector<std::byte>& data() const { return data_; }
     /** @brief Gets a mutable reference to the chunk's data vector. */
     [[nodiscard]] memory::vector<std::byte>& data() { return data_; }
@@ -189,7 +188,7 @@ public:
     void set_dtype(DType dtype) { dtype_ = dtype; }
     void set_hash(const blake3_hash128_t& hash) { hash_ = hash; }
     void set_flags(uint64_t flags) { flags_ = flags; }
-    void set_shape(std::vector<uint32_t> shape) { shape_ = std::move(shape); }
+    void set_shape(memory::vector<uint32_t> shape) { shape_ = std::move(shape); }
     /** @brief Sets the chunk's data, taking ownership of the provided vector. */
     void set_data(memory::vector<std::byte> data) { data_ = std::move(data); }
 
@@ -202,7 +201,7 @@ private:
     DType dtype_{};
     blake3_hash128_t hash_{};
     uint64_t flags_{};
-    std::vector<uint32_t> shape_;
+    memory::vector<uint32_t> shape_;
     memory::vector<std::byte> data_;
 };
 

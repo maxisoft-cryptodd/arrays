@@ -21,7 +21,7 @@ class DataWriter {
 private:
     std::unique_ptr<IStorageBackend> backend_;
     FileHeader file_header_;
-    std::vector<ChunkOffsetsBlock> chunk_offset_blocks_;
+    memory::vector<ChunkOffsetsBlock> chunk_offset_blocks_;
     uint64_t current_chunk_offset_block_start_ = 0;
     size_t current_chunk_offset_block_index_ = 0;
     size_t chunk_offsets_block_capacity_;
