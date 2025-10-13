@@ -8,8 +8,6 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
-#include <vector>
-
 // Forward declarations for dispatcher functions. These are the entry points to the SIMD code.
 namespace cryptodd {
 
@@ -137,13 +135,13 @@ public:
     }
 
     std::expected<memory::vector<std::byte>, std::string> encode16(std::span<const float> soa_data, std::span<const float> prev_row, Temporal2dSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<float>, std::string> decode16(std::span<const std::byte> compressed, std::span<float> prev_row) const;
+    std::expected<memory::vector<float>, std::string> decode16(std::span<const std::byte> compressed, std::span<float> prev_row) const;
 
     std::expected<memory::vector<std::byte>, std::string> encode32(std::span<const float> soa_data, std::span<const float> prev_row, Temporal2dSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<float>, std::string> decode32(std::span<const std::byte> compressed, std::span<float> prev_row) const;
+    std::expected<memory::vector<float>, std::string> decode32(std::span<const std::byte> compressed, std::span<float> prev_row) const;
 
     std::expected<memory::vector<std::byte>, std::string> encode64(std::span<const int64_t> soa_data, std::span<const int64_t> prev_row, Temporal2dSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<int64_t>, std::string> decode64(std::span<const std::byte> compressed, std::span<int64_t> prev_row) const;
+    std::expected<memory::vector<int64_t>, std::string> decode64(std::span<const std::byte> compressed, std::span<int64_t> prev_row) const;
 
 private:
     size_t num_features_;
@@ -166,15 +164,15 @@ public:
 
     std::expected<memory::vector<std::byte>, std::string> encode16(std::span<const float> soa_data, const PrevRowFloat& prev_row,
                                   Temporal2dSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<float>, std::string> decode16(std::span<const std::byte> compressed, size_t num_rows, PrevRowFloat& prev_row) const;
+    std::expected<memory::vector<float>, std::string> decode16(std::span<const std::byte> compressed, size_t num_rows, PrevRowFloat& prev_row) const;
 
     std::expected<memory::vector<std::byte>, std::string> encode32(std::span<const float> soa_data, const PrevRowFloat& prev_row,
                                   Temporal2dSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<float>, std::string> decode32(std::span<const std::byte> compressed, size_t num_rows, PrevRowFloat& prev_row) const;
+    std::expected<memory::vector<float>, std::string> decode32(std::span<const std::byte> compressed, size_t num_rows, PrevRowFloat& prev_row) const;
 
     std::expected<memory::vector<std::byte>, std::string> encode64(std::span<const int64_t> soa_data, const PrevRowInt64& prev_row,
                                   Temporal2dSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<int64_t>, std::string> decode64(std::span<const std::byte> compressed, size_t num_rows, PrevRowInt64& prev_row) const;
+    std::expected<memory::vector<int64_t>, std::string> decode64(std::span<const std::byte> compressed, size_t num_rows, PrevRowInt64& prev_row) const;
 
 private:
     std::unique_ptr<ICompressor> compressor_;
@@ -190,14 +188,14 @@ inline std::expected<memory::vector<std::byte>, std::string> DynamicTemporal2dSi
     return detail::encode16_2d_impl(soa_data, prev_row, num_rows, num_features_, *compressor_, workspace);
 }
 
-inline std::expected<std::vector<float>, std::string> DynamicTemporal2dSimdCodec::decode16(std::span<const std::byte> compressed, std::span<float> prev_row) const {
+inline std::expected<memory::vector<float>, std::string> DynamicTemporal2dSimdCodec::decode16(std::span<const std::byte> compressed, std::span<float> prev_row) const {
     if (prev_row.size() != num_features_) return std::unexpected("Invalid prev_row size");
     auto shuffled_bytes_result = compressor_->decompress(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->empty() || (shuffled_bytes_result->size() / sizeof(hwy::float16_t)) % num_features_ != 0) return std::unexpected("Decompressed data size mismatch");
     const size_t total_elements = shuffled_bytes_result->size() / sizeof(hwy::float16_t);
     const size_t num_rows = total_elements / num_features_;
-    std::vector<float> out_data(total_elements);
+    memory::vector<float> out_data(total_elements);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct16_2D_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_bytes_result->data()), out_data.data(), num_rows, num_features_, prev_row);
     return out_data;
@@ -211,14 +209,14 @@ inline std::expected<memory::vector<std::byte>, std::string> DynamicTemporal2dSi
     return detail::encode32_2d_impl(soa_data, prev_row, num_rows, num_features_, *compressor_, workspace);
 }
 
-inline std::expected<std::vector<float>, std::string> DynamicTemporal2dSimdCodec::decode32(std::span<const std::byte> compressed, std::span<float> prev_row) const {
+inline std::expected<memory::vector<float>, std::string> DynamicTemporal2dSimdCodec::decode32(std::span<const std::byte> compressed, std::span<float> prev_row) const {
     if (prev_row.size() != num_features_) return std::unexpected("Invalid prev_row size");
     auto shuffled_bytes_result = compressor_->decompress(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->empty() || (shuffled_bytes_result->size() / sizeof(float)) % num_features_ != 0) return std::unexpected("Decompressed data size mismatch");
     const size_t total_elements = shuffled_bytes_result->size() / sizeof(float);
     const size_t num_rows = total_elements / num_features_;
-    std::vector<float> out_data(total_elements);
+    memory::vector<float> out_data(total_elements);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct32_2D_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_bytes_result->data()), out_data.data(), num_rows, num_features_, prev_row);
     return out_data;
@@ -232,14 +230,14 @@ inline std::expected<memory::vector<std::byte>, std::string> DynamicTemporal2dSi
     return detail::encode64_2d_impl(soa_data, prev_row, num_rows, num_features_, *compressor_, workspace);
 }
 
-inline std::expected<std::vector<int64_t>, std::string> DynamicTemporal2dSimdCodec::decode64(std::span<const std::byte> compressed, std::span<int64_t> prev_row) const {
+inline std::expected<memory::vector<int64_t>, std::string> DynamicTemporal2dSimdCodec::decode64(std::span<const std::byte> compressed, std::span<int64_t> prev_row) const {
     if (prev_row.size() != num_features_) return std::unexpected("Invalid prev_row size");
     auto delta_bytes_result = compressor_->decompress(compressed);
     if (!delta_bytes_result) return std::unexpected(delta_bytes_result.error());
     if (delta_bytes_result->empty() || (delta_bytes_result->size() / sizeof(int64_t)) % num_features_ != 0) return std::unexpected("Decompressed data size mismatch");
     const size_t total_elements = delta_bytes_result->size() / sizeof(int64_t);
     const size_t num_rows = total_elements / num_features_;
-    std::vector<int64_t> out_data(total_elements);
+    memory::vector<int64_t> out_data(total_elements);
     simd::UnXorInt64_2D_dispatcher(reinterpret_cast<const int64_t*>(delta_bytes_result->data()), out_data.data(), num_rows, num_features_, prev_row);
     return out_data;
 }
@@ -255,12 +253,12 @@ std::expected<memory::vector<std::byte>, std::string> Temporal2dSimdCodec<NF>::e
 }
 
 template <size_t NF>
-std::expected<std::vector<float>, std::string> Temporal2dSimdCodec<NF>::decode16(std::span<const std::byte> compressed, size_t num_rows, PrevRowFloat& prev_row) const {
+std::expected<memory::vector<float>, std::string> Temporal2dSimdCodec<NF>::decode16(std::span<const std::byte> compressed, size_t num_rows, PrevRowFloat& prev_row) const {
     const size_t total_elements = num_rows * kNumFeatures;
     auto shuffled_bytes_result = compressor_->decompress(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->size() != total_elements * sizeof(hwy::float16_t)) return std::unexpected("Decompressed data size mismatch");
-    std::vector<float> out_data(total_elements);
+    memory::vector<float> out_data(total_elements);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct16_2D_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_bytes_result->data()), out_data.data(), num_rows, NF, {prev_row.data(), NF});
     return out_data;
@@ -275,12 +273,12 @@ std::expected<memory::vector<std::byte>, std::string> Temporal2dSimdCodec<NF>::e
 }
 
 template <size_t NF>
-std::expected<std::vector<float>, std::string> Temporal2dSimdCodec<NF>::decode32(std::span<const std::byte> compressed, size_t num_rows, PrevRowFloat& prev_row) const {
+std::expected<memory::vector<float>, std::string> Temporal2dSimdCodec<NF>::decode32(std::span<const std::byte> compressed, size_t num_rows, PrevRowFloat& prev_row) const {
     const size_t total_elements = num_rows * kNumFeatures;
     auto shuffled_bytes_result = compressor_->decompress(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->size() != total_elements * sizeof(float)) return std::unexpected("Decompressed data size mismatch");
-    std::vector<float> out_data(total_elements);
+    memory::vector<float> out_data(total_elements);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct32_2D_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_bytes_result->data()), out_data.data(), num_rows, NF, {prev_row.data(), NF});
     return out_data;
@@ -295,12 +293,12 @@ std::expected<memory::vector<std::byte>, std::string> Temporal2dSimdCodec<NF>::e
 }
 
 template <size_t NF>
-std::expected<std::vector<int64_t>, std::string> Temporal2dSimdCodec<NF>::decode64(std::span<const std::byte> compressed, size_t num_rows, PrevRowInt64& prev_row) const {
+std::expected<memory::vector<int64_t>, std::string> Temporal2dSimdCodec<NF>::decode64(std::span<const std::byte> compressed, size_t num_rows, PrevRowInt64& prev_row) const {
     const size_t total_elements = num_rows * kNumFeatures;
     auto delta_bytes_result = compressor_->decompress(compressed);
     if (!delta_bytes_result) return std::unexpected(delta_bytes_result.error());
     if (delta_bytes_result->size() != total_elements * sizeof(int64_t)) return std::unexpected("Decompressed data size mismatch");
-    std::vector<int64_t> out_data(total_elements);
+    memory::vector<int64_t> out_data(total_elements);
     simd::UnXorInt64_2D_dispatcher(reinterpret_cast<const int64_t*>(delta_bytes_result->data()), out_data.data(), num_rows, NF, {prev_row.data(), NF});
     return out_data;
 }

@@ -6,10 +6,11 @@
 #include <vector>
 
 using Codec1D = cryptodd::Temporal1dSimdCodec;
+using namespace cryptodd;
 
 template <typename T>
-std::vector<T> generate_random_1d_data(size_t num_elements) {
-    std::vector<T> data(num_elements);
+auto generate_random_1d_data(size_t num_elements) {
+    memory::vector<T> data(num_elements);
     std::random_device rd;
     std::mt19937 gen(rd());
 
@@ -36,8 +37,8 @@ protected:
 
     static constexpr size_t kNumElements = 16 * 1024;
 
-    std::vector<float> original_float_data;
-    std::vector<int64_t> original_int64_data;
+    memory::vector<float> original_float_data;
+    memory::vector<int64_t> original_int64_data;
     float initial_prev_element_float = 123.45f;
     int64_t initial_prev_element_int64 = 98765;
 };

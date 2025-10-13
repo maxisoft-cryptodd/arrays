@@ -8,10 +8,11 @@
 #include <vector>
 
 using OkxCodec = cryptodd::OkxObSimdCodec;
+using namespace cryptodd;
 
 // Helper function to generate random snapshot data
-std::vector<float> generate_random_snapshots(size_t num_snapshots) {
-    std::vector<float> data(num_snapshots * OkxCodec::SnapshotFloats);
+auto generate_random_snapshots(size_t num_snapshots) {
+    memory::vector<float> data(num_snapshots * OkxCodec::SnapshotFloats);
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(-1000.0, 1000.0);
@@ -37,7 +38,7 @@ protected:
     static constexpr size_t num_snapshots = 16 * 32; // Use a multiple of vector lanes for cleaner testing
 
     // Test data
-    std::vector<float> original_data;
+    memory::vector<float> original_data;
     OkxCodec::Snapshot initial_prev_snapshot{};
 };
 
@@ -80,9 +81,9 @@ TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_NoDictionary)
 
 TEST_F(OkxObSimdCodecTest, FullPipelineRoundTrip_WithDictionary)
 {
-    auto dictBuffer = std::vector<std::byte>(original_data.size() * sizeof(float) / 15);
+    auto dictBuffer = memory::vector<std::byte>(original_data.size() * sizeof(float) / 15);
     ASSERT_GT(dictBuffer.size(), 8);
-    auto sampleSizes = std::vector<size_t>();
+    auto sampleSizes = memory::vector<size_t>();
     sampleSizes.assign(original_data.size() / OkxCodec::SnapshotFloats, OkxCodec::SnapshotFloats * sizeof(float));
     ASSERT_GT(sampleSizes.size(), 80);
     const size_t dict_size = ZDICT_trainFromBuffer(

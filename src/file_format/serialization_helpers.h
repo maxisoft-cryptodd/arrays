@@ -62,12 +62,12 @@ inline std::expected<size_t, std::string> write_vector_pod(storage::IStorageBack
 
 // Reads a vector of POD types
 template<typename T>
-inline std::expected<std::vector<T>, std::string> read_vector_pod(storage::IStorageBackend& backend) {
+inline std::expected<memory::vector<T>, std::string> read_vector_pod(storage::IStorageBackend& backend) {
     auto size_result = read_pod<uint32_t>(backend);
     if (!size_result) {
         return std::unexpected(size_result.error());
     }
-    std::vector<T> vec(*size_result);
+    memory::vector<T> vec(*size_result);
     if (*size_result > 0) {
         auto read_result = backend.read(std::as_writable_bytes(std::span(vec)));
         if (!read_result) {

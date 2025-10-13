@@ -42,8 +42,8 @@ void Blake3StreamHasher::finalize_to_span(std::span<std::byte> out) const {
     blake3_hasher_finalize(&pimpl_->hasher_, reinterpret_cast<uint8_t*>(out.data()), out.size());
 }
 
-std::vector<std::byte> Blake3StreamHasher::finalize(size_t out_len) const {
-    std::vector<std::byte> hash_bytes(out_len);
+memory::vector<std::byte> Blake3StreamHasher::finalize(size_t out_len) const {
+    memory::vector<std::byte> hash_bytes(out_len);
     finalize_to_span(hash_bytes);
     return hash_bytes;
 }

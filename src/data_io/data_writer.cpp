@@ -17,7 +17,7 @@ ZstdCompressor& DataWriter::get_zstd_compressor() const {
 std::expected<void, std::string> DataWriter::write_new_chunk_offsets_block(uint64_t previous_block_offset) {
     ChunkOffsetsBlock new_block;
     new_block.set_type(ChunkOffsetType::RAW);
-    new_block.set_offsets_and_pointer(std::vector<uint64_t>(chunk_offsets_block_capacity_ + 1, 0));
+    new_block.set_offsets_and_pointer(memory::vector<uint64_t>(chunk_offsets_block_capacity_ + 1, 0));
 
     auto tell_res = backend_->tell();
     if (!tell_res) return std::unexpected(tell_res.error());
@@ -237,7 +237,7 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
     chunk.set_hash(calculate_blake3_hash128(data));
     chunk.set_flags(flags);
 
-    std::vector<uint32_t> shape_vec;
+    memory::vector<uint32_t> shape_vec;
     if (shape.empty() || shape.back() != 0) {
         shape_vec.reserve(shape.size() + 1);
         shape_vec.assign(shape.begin(), shape.end());

@@ -5,10 +5,9 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
-#include <vector>
-
 #include "codec_constants.h"
 #include "i_compressor.h"
+#include "../memory/allocator.h"
 
 #include <hwy/aligned_allocator.h>
 #include <hwy/base.h> // For hwy::float16_t
@@ -207,10 +206,10 @@ public:
     DynamicOrderbookSimdCodec& operator=(const DynamicOrderbookSimdCodec&) = delete;
 
     std::expected<memory::vector<std::byte>, std::string> encode16(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<float>, std::string> decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const;
+    std::expected<memory::vector<float>, std::string> decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const;
 
     std::expected<memory::vector<std::byte>, std::string> encode32(std::span<const float> snapshots, std::span<const float> prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<float>, std::string> decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const;
+    std::expected<memory::vector<float>, std::string> decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const;
 
     [[nodiscard]] std::pair<size_t, size_t> get_depth_features_count() const
     {
@@ -242,11 +241,11 @@ inline std::expected<memory::vector<std::byte>, std::string> DynamicOrderbookSim
     return detail::encode16_impl(snapshots, prev_snapshot, num_floats / snapshot_floats_, snapshot_floats_, *compressor_, workspace);
 }
 
-inline std::expected<std::vector<float>, std::string> DynamicOrderbookSimdCodec::decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const {
+inline std::expected<memory::vector<float>, std::string> DynamicOrderbookSimdCodec::decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const {
     if (prev_snapshot.size() != snapshot_floats_) {
         return std::unexpected("prev_snapshot size does not match configured snapshot_floats.");
     }
-    if (num_snapshots == 0) return std::vector<float>{};
+    if (num_snapshots == 0) return memory::vector<float>{};
 
     auto shuffled_f16_bytes_result = compressor_->decompress(encoded_data);
     if (!shuffled_f16_bytes_result) {
@@ -259,7 +258,7 @@ inline std::expected<std::vector<float>, std::string> DynamicOrderbookSimdCodec:
         return std::unexpected("Decompressed data size does not match expected size for the given number of snapshots.");
     }
 
-    std::vector<float> final_output(num_floats);
+    memory::vector<float> final_output(num_floats);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_f16_bytes_result->data()), // NOLINT
                                        final_output.data(), num_snapshots, snapshot_floats_, prev_snapshot);
@@ -279,11 +278,11 @@ inline std::expected<memory::vector<std::byte>, std::string> DynamicOrderbookSim
     return detail::encode32_impl(snapshots, prev_snapshot, num_floats / snapshot_floats_, snapshot_floats_, *compressor_, workspace);
 }
 
-inline std::expected<std::vector<float>, std::string> DynamicOrderbookSimdCodec::decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const {
+inline std::expected<memory::vector<float>, std::string> DynamicOrderbookSimdCodec::decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, std::span<float> prev_snapshot) const {
     if (prev_snapshot.size() != snapshot_floats_) {
         return std::unexpected("prev_snapshot size does not match configured snapshot_floats.");
     }
-    if (num_snapshots == 0) return std::vector<float>{};
+    if (num_snapshots == 0) return memory::vector<float>{};
 
     auto shuffled_f32_bytes_result = compressor_->decompress(encoded_data);
     if (!shuffled_f32_bytes_result) {
@@ -296,7 +295,7 @@ inline std::expected<std::vector<float>, std::string> DynamicOrderbookSimdCodec:
         return std::unexpected("Decompressed data size does not match expected size for the given number of snapshots.");
     }
 
-    std::vector<float> final_output(num_floats);
+    memory::vector<float> final_output(num_floats);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstructFloat32_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_f32_bytes_result->data()), // NOLINT
                                               final_output.data(), num_snapshots, snapshot_floats_, prev_snapshot);
@@ -328,10 +327,10 @@ public:
     OrderbookSimdCodec& operator=(const OrderbookSimdCodec&) = delete;
 
     std::expected<memory::vector<std::byte>, std::string> encode16(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<float>, std::string> decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const;
+    std::expected<memory::vector<float>, std::string> decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const;
 
     std::expected<memory::vector<std::byte>, std::string> encode32(std::span<const float> snapshots, const Snapshot& prev_snapshot, OrderbookSimdCodecWorkspace& workspace) const;
-    std::expected<std::vector<float>, std::string> decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const;
+    std::expected<memory::vector<float>, std::string> decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const;
 
 private:
     std::unique_ptr<ICompressor> compressor_;
@@ -348,8 +347,8 @@ std::expected<memory::vector<std::byte>, std::string> OrderbookSimdCodec<Depth, 
 }
 
 template <size_t Depth, size_t Features>
-std::expected<std::vector<float>, std::string> OrderbookSimdCodec<Depth, Features>::decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const {
-    if (num_snapshots == 0) return std::vector<float>{};
+std::expected<memory::vector<float>, std::string> OrderbookSimdCodec<Depth, Features>::decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const {
+    if (num_snapshots == 0) return memory::vector<float>{};
 
     auto shuffled_f16_bytes_result = compressor_->decompress(encoded_data);
     if (!shuffled_f16_bytes_result) {
@@ -362,7 +361,7 @@ std::expected<std::vector<float>, std::string> OrderbookSimdCodec<Depth, Feature
         return std::unexpected("Decompressed data size does not match expected size for the given number of snapshots.");
     }
 
-    std::vector<float> final_output(num_floats);
+    memory::vector<float> final_output(num_floats);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_f16_bytes_result->data()), // NOLINT
                                        final_output.data(), num_snapshots, SnapshotFloats, {prev_snapshot.data(), SnapshotFloats});
@@ -381,8 +380,8 @@ std::expected<memory::vector<std::byte>, std::string> OrderbookSimdCodec<Depth, 
 }
 
 template <size_t Depth, size_t Features>
-std::expected<std::vector<float>, std::string> OrderbookSimdCodec<Depth, Features>::decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const {
-    if (num_snapshots == 0) return std::vector<float>{};
+std::expected<memory::vector<float>, std::string> OrderbookSimdCodec<Depth, Features>::decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const {
+    if (num_snapshots == 0) return memory::vector<float>{};
 
     auto shuffled_f32_bytes_result = compressor_->decompress(encoded_data);
     if (!shuffled_f32_bytes_result) {
@@ -395,7 +394,7 @@ std::expected<std::vector<float>, std::string> OrderbookSimdCodec<Depth, Feature
         return std::unexpected("Decompressed data size does not match expected size for the given number of snapshots.");
     }
 
-    std::vector<float> final_output(num_floats);
+    memory::vector<float> final_output(num_floats);
     static_assert(sizeof(std::byte) == sizeof(uint8_t)); // NOLINT
     simd::UnshuffleAndReconstructFloat32_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_f32_bytes_result->data()), // NOLINT
                                               final_output.data(), num_snapshots, SnapshotFloats, {prev_snapshot.data(), SnapshotFloats});

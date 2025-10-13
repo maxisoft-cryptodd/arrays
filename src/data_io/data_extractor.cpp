@@ -109,7 +109,7 @@ struct DataExtractor::Impl
         const size_t depth = chunk.get_shape()[1];
         const size_t features = chunk.get_shape()[2];
 
-        std::expected<std::vector<float>, std::string> decoded_result;
+        std::expected<memory::vector<float>, std::string> decoded_result;
 
         if (chunk.type() == ChunkDataType::OKX_OB_SIMD_F16 || chunk.type() == ChunkDataType::OKX_OB_SIMD_F32)
         {

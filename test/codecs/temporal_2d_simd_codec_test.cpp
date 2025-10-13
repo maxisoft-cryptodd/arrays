@@ -7,10 +7,11 @@
 
 using StaticCodec = cryptodd::Temporal2dSimdCodec<8>;
 using DynamicCodec = cryptodd::DynamicTemporal2dSimdCodec;
+using namespace cryptodd;
 
 template <typename T>
-std::vector<T> generate_random_soa_data(size_t num_rows, size_t num_features) {
-    std::vector<T> data(num_rows * num_features);
+auto generate_random_soa_data(size_t num_rows, size_t num_features) {
+    memory::vector<T> data(num_rows * num_features);
     std::random_device rd;
     std::mt19937 gen(rd());
 
@@ -40,8 +41,8 @@ protected:
 
     static constexpr size_t kNumRows = 16 * 32;
 
-    std::vector<float> original_float_data;
-    std::vector<int64_t> original_int64_data;
+    memory::vector<float> original_float_data;
+    memory::vector<int64_t> original_int64_data;
     StaticCodec::PrevRowFloat initial_prev_row_float{};
     StaticCodec::PrevRowInt64 initial_prev_row_int64{};
 };

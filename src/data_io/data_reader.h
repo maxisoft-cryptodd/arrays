@@ -22,7 +22,7 @@ class DataReader {
 
     std::unique_ptr<storage::IStorageBackend> backend_;
     FileHeader file_header_;
-    std::vector<uint64_t> master_chunk_offsets_; // Consolidated index of all chunk offsets
+    memory::vector<uint64_t> master_chunk_offsets_; // Consolidated index of all chunk offsets
     mutable std::optional<ZstdCompressor> zstd_compressor_;
     mutable std::once_flag zstd_init_flag_;
 
