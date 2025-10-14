@@ -2,6 +2,7 @@
 #include "../src/file_format/cdd_file_format.h"
 #include "../src/data_io/data_writer.h"
 #include "../src/data_io/data_reader.h"
+#include "../src/memory/allocator.h"
 #include <filesystem>
 // Include the single-header UUID library for unique filenames
 #include "../src/codecs/zstd_compressor.h"

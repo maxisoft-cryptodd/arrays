@@ -143,7 +143,7 @@ TEST_F(Temporal2dSimdCodecTest, Dynamic_FullPipelineRoundTrip_Float32) {
     DynamicCodec codec(StaticCodec::kNumFeatures, std::make_unique<cryptodd::ZstdCompressor>());
     cryptodd::Temporal2dSimdCodecWorkspace workspace;
 
-    std::vector<float> decoder_prev_row(initial_prev_row_float.begin(), initial_prev_row_float.end());
+    memory::vector<float> decoder_prev_row(initial_prev_row_float.begin(), initial_prev_row_float.end());
 
     // Encode
     auto encoded_result = codec.encode32(original_float_data, decoder_prev_row, workspace);

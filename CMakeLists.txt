@@ -25,11 +25,17 @@ endif ()
 
 project(cryptodd_arrays)
 
+# ==================================================================================================
+# Project Options
+# ==================================================================================================
+option(USE_MIMALLOC "Enable the mimalloc memory allocator." OFF)
+
 # Suppress the "CMAKE_TOOLCHAIN_FILE not used" warning.
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Good practice for libraries: hide symbols by default
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
@@ -45,13 +51,12 @@ add_library(cryptodd_arrays_lib STATIC
     src/codecs/orderbook_simd_codec.cpp
     src/codecs/temporal_1d_simd_codec.cpp
     src/codecs/temporal_2d_simd_codec.cpp
-        src/data_io/data_extractor.cpp
-        src/data_io/data_extractor.h
-        src/file_format/cdd_file_format.cpp
-        src/storage/file_backend.cpp
-        src/storage/memory_backend.cpp
-        src/data_io/buffer.cpp
-        src/storage/mio_backend.cpp
+    #src/data_io/data_extractor.cpp
+    src/file_format/cdd_file_format.cpp
+    src/storage/file_backend.cpp
+    src/storage/memory_backend.cpp
+    src/data_io/buffer.cpp
+    src/storage/mio_backend.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
@@ -59,35 +64,16 @@ set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_array
 # Enable dynamic dispatch for the library target
 target_compile_definitions(cryptodd_arrays_lib PRIVATE HWY_EXPORT_AND_DYNAMIC_DISPATCH)
 
-add_library(cryptodd_arrays_shared SHARED
-        library.cpp
-)
-
-set_target_properties(cryptodd_arrays_shared PROPERTIES OUTPUT_NAME "cryptodd_arrays")
-
-target_link_libraries(cryptodd_arrays_shared PRIVATE cryptodd_arrays_lib)
-
-# This creates cryptodd_arrays_export.h and defines CRYPTODD_ARRAYS_API
-GENERATE_EXPORT_HEADER(cryptodd_arrays_shared)
-
-# Add the binary directory to the include path. This is where the export header is generated.
 target_include_directories(cryptodd_arrays_lib PUBLIC
     "${CMAKE_BINARY_DIR}"
     "${CMAKE_SOURCE_DIR}/src/storage"
     "${CMAKE_SOURCE_DIR}/src/file_format"
     "${CMAKE_SOURCE_DIR}/src/data_io"
     "${CMAKE_SOURCE_DIR}/src/codecs"
-        "${CMAKE_SOURCE_DIR}/src/memory"
+    "${CMAKE_SOURCE_DIR}/src/memory"
 )
 
-target_include_directories(cryptodd_arrays_shared PUBLIC
-        "${CMAKE_BINARY_DIR}"
-        cryptodd_arrays_lib
-)
-
-add_executable(cryptodd_arrays_exe main.cpp)
-
-# Find and link dependencies
+# Link dependencies
 find_package(zstd CONFIG REQUIRED)
 find_package(lz4 CONFIG REQUIRED)
 find_package(blake3 CONFIG REQUIRED)
@@ -110,11 +96,38 @@ target_link_libraries(cryptodd_arrays_lib PUBLIC
         stduuid
         hwy::hwy
         mio::mio mio::mio-headers
-        mimalloc-static
 )
 
-# Link the executable to the library
+# Conditionally add and link mimalloc
+if(USE_MIMALLOC)
+    target_compile_definitions(cryptodd_arrays_lib PRIVATE USE_MIMALLOC)
+    # The library links to mimalloc to use its STL allocator internally
+    target_link_libraries(cryptodd_arrays_lib PUBLIC mimalloc-static)
+endif()
+
+add_library(cryptodd_arrays_shared SHARED
+        library.cpp
+)
+
+set_target_properties(cryptodd_arrays_shared PROPERTIES OUTPUT_NAME "cryptodd_arrays")
+
+target_link_libraries(cryptodd_arrays_shared PRIVATE cryptodd_arrays_lib)
+
+# This creates cryptodd_arrays_export.h and defines CRYPTODD_ARRAYS_API
+GENERATE_EXPORT_HEADER(cryptodd_arrays_shared)
+
+target_include_directories(cryptodd_arrays_shared PUBLIC
+        "${CMAKE_BINARY_DIR}"
+        cryptodd_arrays_lib
+)
+
+add_executable(cryptodd_arrays_exe main.cpp)
 target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays_lib)
+if(USE_MIMALLOC)
+    # For the final executable, we override global new/delete.
+    # This is the correct place to do it, not in the library.
+    target_sources(cryptodd_arrays_exe PRIVATE src/memory/mimalloc_override.cpp)
+endif()
 
 # Add a test executable
 add_executable(cryptodd_arrays_test
@@ -126,7 +139,10 @@ add_executable(cryptodd_arrays_test
         test/storage/storage_backend_tests.cpp
         test/test_helpers.cpp)
 target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
-
+if(USE_MIMALLOC)
+    target_compile_definitions(cryptodd_arrays_test PRIVATE USE_MIMALLOC)
+    target_sources(cryptodd_arrays_test PRIVATE src/memory/mimalloc_override.cpp)
+endif()
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)
 
@@ -168,7 +184,7 @@ target_compile_definitions(cryptodd_arrays_py PRIVATE
 set_target_properties(cryptodd_arrays_py PROPERTIES OUTPUT_NAME "cryptodd_arrays_cpp")
 target_link_libraries(cryptodd_arrays_py PRIVATE pybind11::pybind11 cryptodd_arrays_lib)
 
-IF(DEFINED PY_BUILD_CMAKE_IMPORT_NAME)
-install(TARGETS cryptodd_arrays_py
+if(DEFINED PY_BUILD_CMAKE_IMPORT_NAME)
+    install(TARGETS cryptodd_arrays_py
         DESTINATION ${PY_BUILD_CMAKE_IMPORT_NAME})
-ENDIF()
+endif()

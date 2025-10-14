@@ -93,13 +93,9 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Decode16)(benchmark::State& state) {
 
 // Register the benchmarks to run with a range of snapshot counts.
 // This will test the codec with small, medium, and large batches of data.
-BENCHMARK_REGISTER_F(OkxObSimdCodecBenchmark, Encode16)
-    ->RangeMultiplier(8)
-    ->Range(16, 16 * 1024); // From 16 to 16k snapshots
+BENCHMARK_REGISTER_F(OkxObSimdCodecBenchmark, Encode16)->RangeMultiplier(8)->Range(16, 16 * 1024); // From 16 to 16k snapshots
 
-BENCHMARK_REGISTER_F(OkxObSimdCodecBenchmark, Decode16)
-    ->RangeMultiplier(8)
-    ->Range(16, 16 * 1024);
+BENCHMARK_REGISTER_F(OkxObSimdCodecBenchmark, Decode16)->RangeMultiplier(8)->Range(16, 16 * 1024);
 
 // --- Benchmarks for Float32 Pipeline ---
 

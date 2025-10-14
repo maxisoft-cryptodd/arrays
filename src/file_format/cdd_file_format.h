@@ -27,12 +27,25 @@ enum class ChunkOffsetType : uint16_t {
 enum class ChunkDataType : uint16_t {
     RAW = 0,
     ZSTD_COMPRESSED = 1,
-    OKX_OB_SIMD_F16 = 2,
+
+    // Orderbook Codecs (F16 internal precision, returned as F32)
+    OKX_OB_SIMD_F16_AS_F32 = 2,
     OKX_OB_SIMD_F32 = 3,
-    BINANCE_OB_SIMD_F16 = 4,
+    BINANCE_OB_SIMD_F16_AS_F32 = 4,
     BINANCE_OB_SIMD_F32 = 5,
-    GENERIC_OB_SIMD_F16 = 6,
-    GENERIC_OB_SIMD_F32 = 7
+    GENERIC_OB_SIMD_F16_AS_F32 = 6,
+    GENERIC_OB_SIMD_F32 = 7,
+
+    // Temporal 1D Codecs
+    TEMPORAL_1D_SIMD_F16_XOR_SHUFFLE_AS_F32 = 8,
+    TEMPORAL_1D_SIMD_F32_XOR_SHUFFLE = 9,
+    TEMPORAL_1D_SIMD_I64_XOR = 10,
+    TEMPORAL_1D_SIMD_I64_DELTA = 11,
+
+    // Temporal 2D Codecs
+    TEMPORAL_2D_SIMD_F16_AS_F32 = 12,
+    TEMPORAL_2D_SIMD_F32 = 13,
+    TEMPORAL_2D_SIMD_I64 = 14
 };
 
 enum class DType : uint16_t {
