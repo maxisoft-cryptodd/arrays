@@ -7,7 +7,12 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include "../memory/aligned.h"
+
 namespace cryptodd {
+
+using Float32AlignedVector = memory::AlignedVector<float, static_cast<std::size_t>(HWY_ALIGNMENT)>;
+using Int64AlignedVector = memory::AlignedVector<int64_t, static_cast<std::size_t>(HWY_ALIGNMENT)>;
 
 // Forward declarations for SIMD functions, now in their own namespace
 namespace simd {
@@ -60,19 +65,19 @@ public:
 
     // Chain: float32 -> demote to float16 -> XOR -> shuffle
     std::expected<memory::vector<std::byte>, std::string> encode16_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
-    std::expected<memory::vector<float>, std::string> decode16_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const;
+    std::expected<Float32AlignedVector, std::string> decode16_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const;
 
     // Chain: float32 -> XOR -> shuffle
     std::expected<memory::vector<std::byte>, std::string> encode32_Xor_Shuffle(std::span<const float> data, float prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
-    std::expected<memory::vector<float>, std::string> decode32_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const;
+    std::expected<Float32AlignedVector, std::string> decode32_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const;
 
     // Chain: int64 -> XOR
     std::expected<memory::vector<std::byte>, std::string> encode64_Xor(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
-    std::expected<memory::vector<int64_t>, std::string> decode64_Xor(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const;
+    std::expected<Int64AlignedVector, std::string> decode64_Xor(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const;
 
     // Chain: int64 -> delta (subtraction)
     std::expected<memory::vector<std::byte>, std::string> encode64_Delta(std::span<const int64_t> data, int64_t prev_element, Temporal1dSimdCodecWorkspace& workspace) const;
-    std::expected<memory::vector<int64_t>, std::string> decode64_Delta(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const;
+    std::expected<Int64AlignedVector, std::string> decode64_Delta(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const;
 
 private:
     std::unique_ptr<ICompressor> compressor_;
@@ -92,12 +97,12 @@ inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec
     return compressor_->compress({reinterpret_cast<const std::byte*>(shuffled_bytes), data.size() * sizeof(hwy::float16_t)});
 }
 
-inline std::expected<memory::vector<float>, std::string> Temporal1dSimdCodec::decode16_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const {
+inline std::expected<Float32AlignedVector, std::string> Temporal1dSimdCodec::decode16_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const {
     auto shuffled_bytes_result = compressor_->decompress(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->size() != num_elements * sizeof(hwy::float16_t)) return std::unexpected("Decompressed data size mismatch");
 
-    memory::vector<float> out_data(num_elements);
+    Float32AlignedVector out_data(num_elements);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct16_1D_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_bytes_result->data()), out_data.data(), num_elements, prev_element);
     return out_data;
@@ -115,12 +120,12 @@ inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec
     return compressor_->compress({reinterpret_cast<const std::byte*>(shuffled_bytes), data.size() * sizeof(float)});
 }
 
-inline std::expected<memory::vector<float>, std::string> Temporal1dSimdCodec::decode32_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const {
+inline std::expected<Float32AlignedVector, std::string> Temporal1dSimdCodec::decode32_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const {
     auto shuffled_bytes_result = compressor_->decompress(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->size() != num_elements * sizeof(float)) return std::unexpected("Decompressed data size mismatch");
 
-    memory::vector<float> out_data(num_elements);
+    Float32AlignedVector out_data(num_elements);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct32_1D_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_bytes_result->data()), out_data.data(), num_elements, prev_element);
     return out_data;
@@ -134,12 +139,12 @@ inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec
     return compressor_->compress({reinterpret_cast<const std::byte*>(i64_deltas), data.size() * sizeof(int64_t)});
 }
 
-inline std::expected<memory::vector<int64_t>, std::string> Temporal1dSimdCodec::decode64_Xor(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const {
+inline std::expected<Int64AlignedVector, std::string> Temporal1dSimdCodec::decode64_Xor(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const {
     auto delta_bytes_result = compressor_->decompress(compressed);
     if (!delta_bytes_result) return std::unexpected(delta_bytes_result.error());
     if (delta_bytes_result->size() != num_elements * sizeof(int64_t)) return std::unexpected("Decompressed data size mismatch");
 
-    memory::vector<int64_t> out_data(num_elements);
+    Int64AlignedVector out_data(num_elements);
     simd::UnXorInt64_1D_dispatcher(reinterpret_cast<const int64_t*>(delta_bytes_result->data()), out_data.data(), num_elements, prev_element);
     return out_data;
 }
@@ -152,12 +157,12 @@ inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec
     return compressor_->compress({reinterpret_cast<const std::byte*>(i64_deltas), data.size() * sizeof(int64_t)});
 }
 
-inline std::expected<memory::vector<int64_t>, std::string> Temporal1dSimdCodec::decode64_Delta(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const {
+inline std::expected<Int64AlignedVector, std::string> Temporal1dSimdCodec::decode64_Delta(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const {
     auto delta_bytes_result = compressor_->decompress(compressed);
     if (!delta_bytes_result) return std::unexpected(delta_bytes_result.error());
     if (delta_bytes_result->size() != num_elements * sizeof(int64_t)) return std::unexpected("Decompressed data size mismatch");
 
-    memory::vector<int64_t> out_data(num_elements);
+    Int64AlignedVector out_data(num_elements);
     simd::CumulativeSumInt64_1D_dispatcher(reinterpret_cast<const int64_t*>(delta_bytes_result->data()), out_data.data(), num_elements, prev_element);
     return out_data;
 }

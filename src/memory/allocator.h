@@ -21,4 +21,18 @@ namespace cryptodd::memory
     using vector = std::vector<T>;
 #endif
 
+template<typename T>
+vector<T> create_aligned_vector(const size_t size, const size_t alignment)
+{
+    static_assert(std::is_arithmetic_v<T>);
+    uintptr_t uintptr_t_size = size * sizeof(T) / sizeof(uintptr_t);
+    if (uintptr_t_size % alignment != 0)
+    {
+        uintptr_t_size += alignment - uintptr_t_size % alignment;
+    }
+    auto res = vector<T>(uintptr_t_size * sizeof(uintptr_t) / sizeof(T));
+    res.resize(size);
+    return res;
+}
+
 }

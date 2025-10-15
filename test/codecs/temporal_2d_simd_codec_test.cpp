@@ -128,7 +128,9 @@ TEST_F(Temporal2dSimdCodecTest, Static_FullPipelineRoundTrip_Int64) {
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_int64_data.size());
-    EXPECT_EQ(decoded_data, original_int64_data);
+    for (size_t i = 0; i < original_int64_data.size(); ++i) {
+        ASSERT_EQ(original_int64_data[i], decoded_data[i]);
+    }
 
     // Verify final state
     for (size_t f = 0; f < StaticCodec::kNumFeatures; ++f) {
@@ -158,7 +160,9 @@ TEST_F(Temporal2dSimdCodecTest, Dynamic_FullPipelineRoundTrip_Float32) {
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_float_data.size());
-    EXPECT_EQ(decoded_data, original_float_data);
+    for (size_t i = 0; i < original_float_data.size(); ++i) {
+        ASSERT_EQ(original_float_data[i], decoded_data[i]);
+    }
 
     // Verify final state
     for (size_t f = 0; f < StaticCodec::kNumFeatures; ++f) {

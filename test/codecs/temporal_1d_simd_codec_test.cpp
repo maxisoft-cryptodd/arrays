@@ -89,7 +89,9 @@ TEST_F(Temporal1dSimdCodecTest, FullPipeline_Float32_Xor_Shuffle) {
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_float_data.size());
-    EXPECT_EQ(decoded_data, original_float_data);
+    for (size_t i = 0; i < original_float_data.size(); ++i) {
+        ASSERT_EQ(original_float_data[i], decoded_data[i]);
+    }
 
     // Verify final state
     ASSERT_EQ(original_float_data.back(), decoder_prev_element);
@@ -114,7 +116,9 @@ TEST_F(Temporal1dSimdCodecTest, FullPipeline_Int64_Xor) {
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_int64_data.size());
-    EXPECT_EQ(decoded_data, original_int64_data);
+    for (size_t i = 0; i < original_int64_data.size(); ++i) {
+        ASSERT_EQ(original_int64_data[i], decoded_data[i]);
+    }
 
     // Verify final state
     ASSERT_EQ(original_int64_data.back(), decoder_prev_element);
@@ -139,7 +143,9 @@ TEST_F(Temporal1dSimdCodecTest, FullPipeline_Int64_Delta) {
 
     // Verify data (lossless)
     ASSERT_EQ(decoded_data.size(), original_int64_data.size());
-    EXPECT_EQ(decoded_data, original_int64_data);
+    for (size_t i = 0; i < original_int64_data.size(); ++i) {
+        ASSERT_EQ(original_int64_data[i], decoded_data[i]);
+    }
 
     // Verify final state
     ASSERT_EQ(original_int64_data.back(), decoder_prev_element);
