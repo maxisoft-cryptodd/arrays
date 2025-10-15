@@ -15,6 +15,8 @@ namespace cryptodd {
 
 using Float32AlignedVector = memory::AlignedVector<float, static_cast<std::size_t>(HWY_ALIGNMENT)>;
 using Int64AlignedVector = memory::AlignedVector<int64_t, static_cast<std::size_t>(HWY_ALIGNMENT)>;
+using ByteAlignedVector = memory::AlignedVector<std::byte, static_cast<std::size_t>(HWY_ALIGNMENT)>;
+using ByteAlignedAllocator = ByteAlignedVector::allocator_type;
 
 namespace simd {
     void DemoteAndXor2D_dispatcher(const float* current, const float* prev, hwy::float16_t* out, size_t num_rows, size_t num_features);
@@ -195,7 +197,7 @@ inline std::expected<memory::vector<std::byte>, std::string> DynamicTemporal2dSi
 
 inline std::expected<Float32AlignedVector, std::string> DynamicTemporal2dSimdCodec::decode16(std::span<const std::byte> compressed, std::span<float> prev_row) const {
     if (prev_row.size() != num_features_) return std::unexpected("Invalid prev_row size");
-    auto shuffled_bytes_result = compressor_->decompress(compressed);
+    auto shuffled_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->empty() || (shuffled_bytes_result->size() / sizeof(hwy::float16_t)) % num_features_ != 0) return std::unexpected("Decompressed data size mismatch");
     const size_t total_elements = shuffled_bytes_result->size() / sizeof(hwy::float16_t);
@@ -216,7 +218,7 @@ inline std::expected<memory::vector<std::byte>, std::string> DynamicTemporal2dSi
 
 inline std::expected<Float32AlignedVector, std::string> DynamicTemporal2dSimdCodec::decode32(std::span<const std::byte> compressed, std::span<float> prev_row) const {
     if (prev_row.size() != num_features_) return std::unexpected("Invalid prev_row size");
-    auto shuffled_bytes_result = compressor_->decompress(compressed);
+    auto shuffled_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->empty() || (shuffled_bytes_result->size() / sizeof(float)) % num_features_ != 0) return std::unexpected("Decompressed data size mismatch");
     const size_t total_elements = shuffled_bytes_result->size() / sizeof(float);

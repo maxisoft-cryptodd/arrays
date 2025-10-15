@@ -21,6 +21,8 @@
 namespace cryptodd {
 
 using Float32AlignedVector = memory::AlignedVector<float, static_cast<std::size_t>(HWY_ALIGNMENT)>;
+using ByteAlignedVector = memory::AlignedVector<std::byte, static_cast<std::size_t>(HWY_ALIGNMENT)>;
+using ByteAlignedAllocator = ByteAlignedVector::allocator_type;
 
 // Forward declarations for SIMD functions, now in their own namespace
 namespace simd
@@ -250,7 +252,7 @@ inline std::expected<Float32AlignedVector, std::string> DynamicOrderbookSimdCode
     }
     if (num_snapshots == 0) return {};
 
-    auto shuffled_f16_bytes_result = compressor_->decompress(encoded_data);
+    auto shuffled_f16_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(encoded_data);
     if (!shuffled_f16_bytes_result) {
         return std::unexpected(shuffled_f16_bytes_result.error());
     }
@@ -287,7 +289,7 @@ inline std::expected<Float32AlignedVector, std::string> DynamicOrderbookSimdCode
     }
     if (num_snapshots == 0) return {};
 
-    auto shuffled_f32_bytes_result = compressor_->decompress(encoded_data);
+    auto shuffled_f32_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(encoded_data);
     if (!shuffled_f32_bytes_result) {
         return std::unexpected(shuffled_f32_bytes_result.error());
     }
@@ -353,7 +355,7 @@ template <size_t Depth, size_t Features>
 std::expected<Float32AlignedVector, std::string> OrderbookSimdCodec<Depth, Features>::decode16(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const {
     if (num_snapshots == 0) return {};
 
-    auto shuffled_f16_bytes_result = compressor_->decompress(encoded_data);
+    auto shuffled_f16_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(encoded_data);
     if (!shuffled_f16_bytes_result) {
         return std::unexpected(shuffled_f16_bytes_result.error());
     }
@@ -387,7 +389,7 @@ template <size_t Depth, size_t Features>
 std::expected<Float32AlignedVector, std::string> OrderbookSimdCodec<Depth, Features>::decode32(std::span<const std::byte> encoded_data, size_t num_snapshots, Snapshot& prev_snapshot) const {
     if (num_snapshots == 0) return {};
 
-    auto shuffled_f32_bytes_result = compressor_->decompress(encoded_data);
+    auto shuffled_f32_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(encoded_data);
     if (!shuffled_f32_bytes_result) {
         return std::unexpected(shuffled_f32_bytes_result.error());
     }
