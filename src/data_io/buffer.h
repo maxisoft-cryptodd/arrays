@@ -7,12 +7,27 @@
 #include <span>
 
 #include "../file_format/cdd_file_format.h"
-#include "../memory/allocator.h"
+#include "../memory/aligned.h"
 
 namespace cryptodd
 {
 
-using vect_variant = std::variant<memory::vector<uint8_t>, memory::vector<float>, memory::vector<int64_t>, memory::vector<std::byte>>;
+namespace details
+{
+inline constexpr size_t HWY_ALIGNMENT = 128; // expected, need to set to current highway value
+using Float32AlignedVector = memory::AlignedVector<float, HWY_ALIGNMENT>;
+using ByteAlignedVector = memory::AlignedVector<std::byte, HWY_ALIGNMENT>;
+using Int64AlignedVector = memory::AlignedVector<int64_t, HWY_ALIGNMENT>;
+}
+
+using vect_variant = std::variant<memory::vector<uint8_t>,
+memory::vector<float>,
+memory::vector<int64_t>,
+memory::vector<std::byte>,
+details::Float32AlignedVector,
+details::ByteAlignedVector,
+details::Int64AlignedVector
+>;
 
 class Buffer
 {
@@ -35,6 +50,19 @@ class Buffer
     {
     }
     explicit Buffer(memory::vector<std::byte> &&data) : m_data(std::move(data)) {}
+
+
+    explicit Buffer(details::Float32AlignedVector &&data) : m_data(std::move(data))
+    {
+    }
+
+    explicit Buffer(details::ByteAlignedVector &&data) : m_data(std::move(data))
+    {
+    }
+
+    explicit Buffer(details::Int64AlignedVector &&data) : m_data(std::move(data))
+    {
+    }
 
     Buffer(const Buffer &other) = delete;
     Buffer &operator=(const Buffer &other) = delete;
@@ -101,10 +129,12 @@ class Buffer
         return std::visit(
             []<typename T0>(const T0 &vec) -> DType {
                 using T = std::decay_t<T0>::value_type;
-                if constexpr (std::is_same_v<T, float>)
+                if constexpr (std::is_same_v<T, double>)
+                    return DType::FLOAT64;
+                else if constexpr (std::is_same_v<T, float>)
                     return DType::FLOAT32;
                 else if constexpr (std::is_same_v<T, uint8_t>)
-                    return DType::UINT8;
+                    return DType::UINT8; // NOLINT(*-branch-clone)
                 else if constexpr (std::is_same_v<T, int64_t>)
                     return DType::INT64;
                 else if constexpr (std::is_same_v<T, std::byte>)
