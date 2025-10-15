@@ -434,9 +434,10 @@ void UnshuffleAndReconstruct16(const uint8_t* HWY_RESTRICT shuffled_in, float* H
             hwy::Prefetch(shuffled_in + total_floats + next_base_idx);
         }
 
+        size_t i = 0;
 #if HWY_TARGET == HWY_SCALAR
         // SCALAR PATH START
-        for (size_t i = 0; i < num_floats_per_snapshot; ++i) {
+        for (; i < num_floats_per_snapshot; ++i) {
             // Unshuffle bytes
             const uint8_t b0 = shuffled_in[base_idx_bytes + i];
             const uint8_t b1 = shuffled_in[total_floats + base_idx_bytes + i];
@@ -461,7 +462,7 @@ void UnshuffleAndReconstruct16(const uint8_t* HWY_RESTRICT shuffled_in, float* H
         const size_t f16_lanes = hn::Lanes(d16);
         
         // Process a full f16 vector's worth of floats at a time.
-        for (size_t i = 0; i < num_floats_per_snapshot; i += f16_lanes) {
+        for (; i + f16_lanes <= num_floats_per_snapshot; i += f16_lanes) { // Corrected loop boundary
             // Unshuffle bytes into a float16 vector of DELTAs
             const hn::Rebind<uint8_t, decltype(d16)> d_u8_rebind;
             const auto v_b0 = hn::LoadU(d_u8_rebind, shuffled_in + base_idx_bytes + i);
@@ -489,6 +490,20 @@ void UnshuffleAndReconstruct16(const uint8_t* HWY_RESTRICT shuffled_in, float* H
             VF32 v_out_f32_hi = hn::PromoteUpperTo(d32, v_recon_f16);
             hn::StoreU(v_out_f32_lo, d32, current_out_ptr + i);
             hn::StoreU(v_out_f32_hi, d32, current_out_ptr + i + f32_lanes);
+        }
+        // Scalar remainder loop
+        for (; i < num_floats_per_snapshot; ++i) {
+            const uint8_t b0 = shuffled_in[base_idx_bytes + i];
+            const uint8_t b1 = shuffled_in[total_floats + base_idx_bytes + i];
+            const uint16_t u16_delta = (static_cast<uint16_t>(b1) << 8) | b0;
+
+            const uint16_t u16_prev = hwy::BitCastScalar<uint16_t>(prev_snapshot_ptr[i]);
+            
+            const uint16_t u16_recon = u16_delta ^ u16_prev;
+            
+            prev_snapshot_ptr[i] = hwy::BitCastScalar<hwy::float16_t>(u16_recon);
+            
+            current_out_ptr[i] = hwy::ConvertScalarTo<float>(prev_snapshot_ptr[i]);
         }
         // SIMD PATH END
 #endif
