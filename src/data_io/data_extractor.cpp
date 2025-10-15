@@ -21,19 +21,6 @@ struct DataExtractor::Impl
     mutable std::unique_ptr<ZstdCompressor> zstd_;
     mutable std::once_flag zstd_init_flag_;
 
-    // Workspaces are lazily initialized and must be protected for thread-safe access
-    mutable std::unique_ptr<Temporal1dSimdCodecWorkspace> workspace_1d_;
-    mutable std::once_flag workspace_1d_init_flag_;
-    mutable std::mutex workspace_1d_mutex_;
-
-    mutable std::unique_ptr<Temporal2dSimdCodecWorkspace> workspace_2d_;
-    mutable std::once_flag workspace_2d_init_flag_;
-    mutable std::mutex workspace_2d_mutex_;
-
-    mutable std::unique_ptr<OrderbookSimdCodecWorkspace> workspace_ob_;
-    mutable std::once_flag workspace_ob_init_flag_;
-    mutable std::mutex workspace_ob_mutex_;
-
     // Static, fixed-dimension codecs
     mutable std::unique_ptr<OrderbookSimdCodec<codecs::Orderbook::OKX_DEPTH, codecs::Orderbook::OKX_FEATURES>> okx_ob_codec_;
     mutable std::once_flag okx_ob_codec_init_flag_;
@@ -99,28 +86,10 @@ struct DataExtractor::Impl
         return it->second;
     }
 
-    [[nodiscard]] OrderbookSimdCodecWorkspace& get_ob_workspace() const
-    {
-        std::call_once(workspace_ob_init_flag_, [this]() { workspace_ob_ = std::make_unique<OrderbookSimdCodecWorkspace>(); });
-        return *workspace_ob_;
-    }
-
-    [[nodiscard]] Temporal1dSimdCodecWorkspace& get_1d_workspace() const
-    {
-        std::call_once(workspace_1d_init_flag_, [this]() { workspace_1d_ = std::make_unique<Temporal1dSimdCodecWorkspace>(); });
-        return *workspace_1d_;
-    }
-
     static std::unique_ptr<ICompressor> create_compressor()
     {
         // By default, we use a moderate compression level.
         return std::make_unique<ZstdCompressor>(ZstdCompressor::DEFAULT_COMPRESSION_LEVEL);
-    }
-
-    [[nodiscard]] Temporal2dSimdCodecWorkspace& get_2d_workspace() const
-    {
-        std::call_once(workspace_2d_init_flag_, [this]() { workspace_2d_ = std::make_unique<Temporal2dSimdCodecWorkspace>(); });
-        return *workspace_2d_;
     }
 
     // Private handlers for different chunk types
@@ -213,9 +182,6 @@ struct DataExtractor::Impl
         const size_t num_elements = chunk.num_elements();
         auto& codec = get_temporal_1d_codec();
 
-        std::unique_lock lock(workspace_1d_mutex_);
-        auto& workspace = get_1d_workspace();
-
         switch (chunk.type())
         {
         case ChunkDataType::TEMPORAL_1D_SIMD_F16_XOR_SHUFFLE_AS_F32:
@@ -245,9 +211,6 @@ struct DataExtractor::Impl
         }
         const size_t num_elements = chunk.num_elements();
         auto& codec = get_temporal_1d_codec();
-
-        std::unique_lock lock(workspace_1d_mutex_);
-        auto& workspace = get_1d_workspace();
 
         switch (chunk.type())
         {
@@ -284,9 +247,6 @@ struct DataExtractor::Impl
 
         auto& codec = get_temporal_2d_codec(num_features);
 
-        std::unique_lock lock(workspace_2d_mutex_);
-        auto& workspace = get_2d_workspace();
-
         switch (chunk.type())
         {
         case ChunkDataType::TEMPORAL_2D_SIMD_F16_AS_F32:
@@ -321,9 +281,6 @@ struct DataExtractor::Impl
         }
 
         auto& codec = get_temporal_2d_codec(num_features);
-
-        std::unique_lock lock(workspace_2d_mutex_);
-        auto& workspace = get_2d_workspace();
 
         switch (chunk.type())
         {
