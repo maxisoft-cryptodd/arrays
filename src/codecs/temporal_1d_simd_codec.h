@@ -13,6 +13,8 @@ namespace cryptodd {
 
 using Float32AlignedVector = memory::AlignedVector<float, static_cast<std::size_t>(HWY_ALIGNMENT)>;
 using Int64AlignedVector = memory::AlignedVector<int64_t, static_cast<std::size_t>(HWY_ALIGNMENT)>;
+using ByteAlignedVector = memory::AlignedVector<std::byte, static_cast<std::size_t>(HWY_ALIGNMENT)>;
+using ByteAlignedAllocator = ByteAlignedVector::allocator_type;
 
 // Forward declarations for SIMD functions, now in their own namespace
 namespace simd {
@@ -98,7 +100,7 @@ inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec
 }
 
 inline std::expected<Float32AlignedVector, std::string> Temporal1dSimdCodec::decode16_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const {
-    auto shuffled_bytes_result = compressor_->decompress(compressed);
+    auto shuffled_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->size() != num_elements * sizeof(hwy::float16_t)) return std::unexpected("Decompressed data size mismatch");
 
@@ -121,7 +123,7 @@ inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec
 }
 
 inline std::expected<Float32AlignedVector, std::string> Temporal1dSimdCodec::decode32_Xor_Shuffle(std::span<const std::byte> compressed, size_t num_elements, float& prev_element) const {
-    auto shuffled_bytes_result = compressor_->decompress(compressed);
+    auto shuffled_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(compressed);
     if (!shuffled_bytes_result) return std::unexpected(shuffled_bytes_result.error());
     if (shuffled_bytes_result->size() != num_elements * sizeof(float)) return std::unexpected("Decompressed data size mismatch");
 
@@ -140,7 +142,7 @@ inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec
 }
 
 inline std::expected<Int64AlignedVector, std::string> Temporal1dSimdCodec::decode64_Xor(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const {
-    auto delta_bytes_result = compressor_->decompress(compressed);
+    auto delta_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(compressed);
     if (!delta_bytes_result) return std::unexpected(delta_bytes_result.error());
     if (delta_bytes_result->size() != num_elements * sizeof(int64_t)) return std::unexpected("Decompressed data size mismatch");
 
@@ -158,7 +160,7 @@ inline std::expected<memory::vector<std::byte>, std::string> Temporal1dSimdCodec
 }
 
 inline std::expected<Int64AlignedVector, std::string> Temporal1dSimdCodec::decode64_Delta(std::span<const std::byte> compressed, size_t num_elements, int64_t& prev_element) const {
-    auto delta_bytes_result = compressor_->decompress(compressed);
+    auto delta_bytes_result = compressor_->decompress_to<ByteAlignedAllocator>(compressed);
     if (!delta_bytes_result) return std::unexpected(delta_bytes_result.error());
     if (delta_bytes_result->size() != num_elements * sizeof(int64_t)) return std::unexpected("Decompressed data size mismatch");
 
