@@ -28,7 +28,7 @@ project(cryptodd_arrays)
 # ==================================================================================================
 # Project Options
 # ==================================================================================================
-option(USE_MIMALLOC "Enable the mimalloc memory allocator." OFF)
+option(USE_MIMALLOC "Enable the mimalloc memory allocator." ON)
 
 # Suppress the "CMAKE_TOOLCHAIN_FILE not used" warning.
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -100,7 +100,7 @@ target_link_libraries(cryptodd_arrays_lib PUBLIC
 
 # Conditionally add and link mimalloc
 if(USE_MIMALLOC)
-    target_compile_definitions(cryptodd_arrays_lib PRIVATE USE_MIMALLOC)
+    target_compile_definitions(cryptodd_arrays_lib PUBLIC USE_MIMALLOC)
     # The library links to mimalloc to use its STL allocator internally
     target_link_libraries(cryptodd_arrays_lib PUBLIC mimalloc-static)
 endif()
@@ -140,23 +140,30 @@ add_executable(cryptodd_arrays_test
         test/test_helpers.cpp)
 target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
 if(USE_MIMALLOC)
-    target_compile_definitions(cryptodd_arrays_test PRIVATE USE_MIMALLOC)
+    target_compile_definitions(cryptodd_arrays_test PUBLIC USE_MIMALLOC)
     target_sources(cryptodd_arrays_test PRIVATE src/memory/mimalloc_override.cpp)
 endif()
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)
 
 # Add a benchmark executable
-add_executable(orderbook_simd_benchmark
+add_executable(all_simd_benchmark
         benchmark/codecs/orderbook_simd_codec_benchmark.cpp
         benchmark/codecs/temporal_1d_simd_codec_benchmark.cpp
         benchmark/codecs/temporal_2d_simd_codec_benchmark.cpp
 )
 
-target_link_libraries(orderbook_simd_benchmark PRIVATE
+target_link_libraries(all_simd_benchmark PRIVATE
         benchmark::benchmark
+        benchmark::benchmark_main
         cryptodd_arrays_lib
 )
+
+if(USE_MIMALLOC)
+    target_compile_definitions(all_simd_benchmark PUBLIC USE_MIMALLOC)
+    # For the bench, we override global new/delete.
+    target_sources(all_simd_benchmark PRIVATE src/memory/mimalloc_override.cpp)
+endif()
 
 # Add a benchmark executable for the new 1D codec
 add_executable(temporal_1d_simd_benchmark
@@ -164,6 +171,7 @@ add_executable(temporal_1d_simd_benchmark
 )
 target_link_libraries(temporal_1d_simd_benchmark PRIVATE
         benchmark::benchmark
+        benchmark::benchmark_main
         cryptodd_arrays_lib
 )
 
@@ -173,6 +181,7 @@ add_executable(temporal_2d_simd_benchmark
 )
 target_link_libraries(temporal_2d_simd_benchmark PRIVATE
         benchmark::benchmark
+        benchmark::benchmark_main
         cryptodd_arrays_lib
 )
 

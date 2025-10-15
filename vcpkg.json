@@ -9,6 +9,12 @@
     "mio",
     "mimalloc",
     {
+      "name": "mimalloc",
+      "features": [
+        "secure"
+      ]
+    },
+    {
       "name": "highway",
       "features": [
         "contrib"

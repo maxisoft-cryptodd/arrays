@@ -138,7 +138,3 @@ BENCHMARK_DEFINE_F(OkxObSimdCodecBenchmark, Decode32)(benchmark::State& state) {
 
 BENCHMARK_REGISTER_F(OkxObSimdCodecBenchmark, Encode32)->RangeMultiplier(8)->Range(16, 16 * 1024);
 BENCHMARK_REGISTER_F(OkxObSimdCodecBenchmark, Decode32)->RangeMultiplier(8)->Range(16, 16 * 1024);
-
-
-// It's good practice to have a main entry point for benchmarks.
-BENCHMARK_MAIN();
