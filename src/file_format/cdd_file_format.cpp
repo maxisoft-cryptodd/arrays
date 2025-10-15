@@ -141,7 +141,7 @@ std::expected<void, std::string> Chunk::read(IStorageBackend& backend) {
     if (auto res = read_pod<uint16_t>(backend); res) dtype_ = static_cast<DType>(*res); else return std::unexpected(res.error());
     if (auto res = read_pod<blake3_hash128_t>(backend); res) hash_ = *res; else return std::unexpected(res.error());
     if (auto res = read_pod<uint64_t>(backend); res) flags_ = *res; else return std::unexpected(res.error());
-    if (auto res = read_vector_pod<uint32_t>(backend); res) shape_ = std::move(*res); else return std::unexpected(res.error());
+    if (auto res = read_vector_pod<int64_t>(backend); res) shape_ = std::move(*res); else return std::unexpected(res.error());
     if (auto res = read_blob(backend); res) data_ = std::move(*res); else return std::unexpected(res.error());
 
     auto end_pos = backend.tell();
@@ -152,7 +152,7 @@ std::expected<void, std::string> Chunk::read(IStorageBackend& backend) {
     return {};
 }
 
-std::span<const uint32_t> Chunk::get_shape() const {
+std::span<const int64_t> Chunk::get_shape() const {
     size_t size = shape_.size();
     if (size == 0)
     {
@@ -178,7 +178,11 @@ size_t Chunk::num_elements() const {
     }
     for (auto dim : s)
     {
-        res *= dim;
+        if (dim < 0) {
+            // A negative dimension means the shape is invalid, so the number of elements is 0.
+            return 0;
+        }
+        res *= static_cast<size_t>(dim);
     }
     return res;
 }

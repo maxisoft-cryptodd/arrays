@@ -90,7 +90,7 @@ public:
      * @return The index of the newly appended chunk on success, or an error string.
      */
     std::expected<size_t, std::string> append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
-                                                  std::span<const uint32_t> shape, std::span<const std::byte> data);
+                                                  std::span<const int64_t> shape, std::span<const std::byte> data);
 
     /**
      * @brief Flushes any buffered data to the underlying storage.

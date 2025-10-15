@@ -113,9 +113,15 @@ struct DataExtractor::Impl
             return std::unexpected(CodecError{ErrorCode::InvalidDataType, "Orderbook chunk must have a dtype of FLOAT32."});
         }
 
-        const size_t num_snapshots = chunk.get_shape()[0];
-        const size_t depth = chunk.get_shape()[1];
-        const size_t features = chunk.get_shape()[2];
+        const auto shape = chunk.get_shape();
+        if (shape[0] < 0 || shape[1] < 0 || shape[2] < 0)
+        {
+            return std::unexpected(
+                CodecError{ErrorCode::InvalidChunkShape, "Orderbook chunk has negative shape dimensions."});
+        }
+        const size_t num_snapshots = static_cast<size_t>(shape[0]);
+        const size_t depth = static_cast<size_t>(shape[1]);
+        const size_t features = static_cast<size_t>(shape[2]);
 
         std::expected<Float32AlignedVector, CodecError> decoded_result;
 
@@ -239,7 +245,13 @@ struct DataExtractor::Impl
         {
             return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, std::format("Temporal 2D chunk must have 2 dimensions, but got {}.", chunk.get_shape().size())});
         }
-        const size_t num_features = chunk.get_shape()[1];
+        const auto shape = chunk.get_shape();
+        if (shape[1] < 0)
+        {
+            return std::unexpected(
+                CodecError{ErrorCode::InvalidChunkShape, "Temporal 2D chunk has a negative shape dimension."});
+        }
+        const size_t num_features = static_cast<size_t>(shape[1]);
         if (prev_row.size() != num_features)
         {
             return std::unexpected(CodecError{ErrorCode::InvalidStateSize, std::format("Previous row size mismatch. Expected {}, got {}.", num_features, prev_row.size())});
@@ -274,7 +286,13 @@ struct DataExtractor::Impl
         {
             return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, std::format("Temporal 2D chunk must have 2 dimensions, but got {}.", chunk.get_shape().size())});
         }
-        const size_t num_features = chunk.get_shape()[1];
+        const auto shape = chunk.get_shape();
+        if (shape[1] < 0)
+        {
+            return std::unexpected(
+                CodecError{ErrorCode::InvalidChunkShape, "Temporal 2D chunk has a negative shape dimension."});
+        }
+        const size_t num_features = static_cast<size_t>(shape[1]);
         if (prev_row.size() != num_features)
         {
             return std::unexpected(CodecError{ErrorCode::InvalidStateSize, std::format("Previous row size mismatch. Expected {}, got {}.", num_features, prev_row.size())});
@@ -322,7 +340,12 @@ DataExtractor::BufferResult DataExtractor::read_chunk(Chunk& chunk)
     case ChunkDataType::GENERIC_OB_SIMD_F16_AS_F32:
     case ChunkDataType::GENERIC_OB_SIMD_F32:
         {
-            const size_t snapshot_size = chunk.get_shape()[1] * chunk.get_shape()[2];
+            const auto shape = chunk.get_shape();
+            if (shape.size() < 3 || shape[1] < 0 || shape[2] < 0) {
+                return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Orderbook chunk has invalid shape for state initialization."});
+            }
+
+            const size_t snapshot_size = static_cast<size_t>(shape[1]) * static_cast<size_t>(shape[2]);
             memory::vector<float> prev_snapshot(snapshot_size, 0.0f);
             return pimpl_->handle_orderbook_chunk(chunk, std::move(buffer), prev_snapshot);
         }
@@ -344,14 +367,22 @@ DataExtractor::BufferResult DataExtractor::read_chunk(Chunk& chunk)
     case ChunkDataType::TEMPORAL_2D_SIMD_F16_AS_F32:
     case ChunkDataType::TEMPORAL_2D_SIMD_F32:
         {
-            const size_t num_features = chunk.get_shape()[1];
+            const auto shape = chunk.get_shape();
+            if (shape.size() < 2 || shape[1] < 0) {
+                 return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Temporal 2D chunk has invalid shape for state initialization."});
+            }
+            const size_t num_features = static_cast<size_t>(shape[1]);
             memory::vector<float> prev_row(num_features, 0.0f);
             return pimpl_->handle_temporal_2d_chunk(chunk, std::move(buffer), prev_row);
         }
 
     case ChunkDataType::TEMPORAL_2D_SIMD_I64:
         {
-            const size_t num_features = chunk.get_shape()[1];
+            const auto shape = chunk.get_shape();
+            if (shape.size() < 2 || shape[1] < 0) {
+                 return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Temporal 2D chunk has invalid shape for state initialization."});
+            }
+            const size_t num_features = static_cast<size_t>(shape[1]);
             memory::vector<int64_t> prev_row(num_features, 0);
             return pimpl_->handle_temporal_2d_chunk(chunk, std::move(buffer), prev_row);
         }

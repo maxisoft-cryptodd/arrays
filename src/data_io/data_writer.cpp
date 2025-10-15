@@ -207,10 +207,16 @@ DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend) : bac
 }
 
 std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
-                                                          std::span<const uint32_t> shape,
+                                                          std::span<const int64_t> shape,
                                                           std::span<const std::byte> data) {
     if (shape.size() > MAX_SHAPE_DIMENSIONS) {
         return std::unexpected("Shape has an excessive number of dimensions.");
+    }
+
+    for (const auto dim : shape) {
+        if (dim < 0) {
+            return std::unexpected("Shape dimensions cannot be negative.");
+        }
     }
 
     const size_t new_chunk_index = num_chunks();
@@ -237,7 +243,7 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
     chunk.set_hash(calculate_blake3_hash128(data));
     chunk.set_flags(flags);
 
-    memory::vector<uint32_t> shape_vec;
+    memory::vector<int64_t> shape_vec;
     if (shape.empty() || shape.back() != 0) {
         shape_vec.reserve(shape.size() + 1);
         shape_vec.assign(shape.begin(), shape.end());
@@ -254,7 +260,7 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
         sizeof(uint16_t) + // dtype
         sizeof(blake3_hash128_t) + // hash
         sizeof(uint64_t) + // flags
-        sizeof(uint32_t) + (chunk.shape().size() * sizeof(uint32_t)) + // shape
+        sizeof(uint32_t) + (chunk.shape().size() * sizeof(int64_t)) + // shape
         sizeof(uint32_t) + chunk.data().size(); // data
 
     if (calculated_chunk_size_raw > std::numeric_limits<uint32_t>::max()) {

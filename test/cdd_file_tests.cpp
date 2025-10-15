@@ -80,7 +80,7 @@ TEST_F(CddFileTest, WriteAndReadEmptyFile) {
 
 TEST_F(CddFileTest, WriteAndReadSingleChunk) {
     auto original_data = generate_random_data(1024);
-    memory::vector<uint32_t> shape = {32, 32, 0}; // 32x32 array, null-terminated
+    memory::vector<int64_t> shape = {32, 32};
     const memory::vector<std::byte> user_meta = {
         std::byte('u'), std::byte('s'), std::byte('e'), std::byte('r'),
         std::byte(' '), std::byte('m'), std::byte('e'), std::byte('t'), std::byte('a')
@@ -112,15 +112,31 @@ TEST_F(CddFileTest, WriteAndReadSingleChunk) {
     ASSERT_EQ(read_chunk.type(), ChunkDataType::RAW); // Should be RAW after decompression
     ASSERT_EQ(read_chunk.dtype(), DType::UINT8);
     ASSERT_EQ(read_chunk.flags(), ChunkFlags::NONE);
-    ASSERT_EQ(read_chunk.shape(), shape);
+    
+    auto read_shape_span = read_chunk.get_shape();
+    ASSERT_EQ(read_shape_span.size(), shape.size());
+    EXPECT_TRUE(std::equal(shape.begin(), shape.end(), read_shape_span.begin()));
+
     ASSERT_EQ(read_chunk.data(), original_data);
+}
+
+TEST_F(CddFileTest, WriterRejectsNegativeShape) {
+    auto data = generate_random_data(100);
+    memory::vector<int64_t> shape = {10, -10};
+
+    auto writer_result = DataWriter::create_new(test_filepath_);
+    ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
+    auto writer = std::move(*writer_result);
+    auto append_result = writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data);
+    ASSERT_FALSE(append_result.has_value());
+    EXPECT_EQ(append_result.error(), "Shape dimensions cannot be negative.");
 }
 
 TEST_F(CddFileTest, WriteAndReadMultipleChunksSingleBlock) {
     auto data1 = generate_random_data(512);
     auto data2 = generate_random_data(2048);
-    memory::vector<uint32_t> shape1 = {16, 32, 0};
-    memory::vector<uint32_t> shape2 = {64, 32, 0};
+    memory::vector<int64_t> shape1 = {16, 32};
+    memory::vector<int64_t> shape2 = {64, 32};
 
     // Write
     {
@@ -141,21 +157,25 @@ TEST_F(CddFileTest, WriteAndReadMultipleChunksSingleBlock) {
     auto chunk1_result = reader->get_chunk(0);
     ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
     ASSERT_EQ(chunk1_result->data(), data1);
-    ASSERT_EQ(chunk1_result->shape(), shape1);
+    auto read_shape1_span = chunk1_result->get_shape();
+    ASSERT_EQ(read_shape1_span.size(), shape1.size());
+    EXPECT_TRUE(std::equal(shape1.begin(), shape1.end(), read_shape1_span.begin()));
 
     auto chunk2_result = reader->get_chunk(1);
     ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
     ASSERT_EQ(chunk2_result->data(), data2);
-    ASSERT_EQ(chunk2_result->shape(), shape2);
+    auto read_shape2_span = chunk2_result->get_shape();
+    ASSERT_EQ(read_shape2_span.size(), shape2.size());
+    EXPECT_TRUE(std::equal(shape2.begin(), shape2.end(), read_shape2_span.begin()));
 }
 
 TEST_F(CddFileTest, WriteAndReadMultipleChunksMultipleBlocks) {
     auto data1 = generate_random_data(512);
     auto data2 = generate_random_data(2048);
     auto data3 = generate_random_data(100);
-    memory::vector<uint32_t> shape1 = {16, 32, 0}; // 16*32 = 512
-    memory::vector<uint32_t> shape2 = {32, 64, 0}; // 32*64 = 2048
-    memory::vector<uint32_t> shape3 = {10, 10, 0}; // 10*10 = 100
+    memory::vector<int64_t> shape1 = {16, 32};
+    memory::vector<int64_t> shape2 = {32, 64};
+    memory::vector<int64_t> shape3 = {10, 10};
 
     // Write
     {
@@ -176,23 +196,29 @@ TEST_F(CddFileTest, WriteAndReadMultipleChunksMultipleBlocks) {
 
     auto chunk1_result = reader->get_chunk(0);
     ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
-    ASSERT_EQ(chunk1_result->shape(), shape1);
+    auto read_shape1_span = chunk1_result->get_shape();
+    ASSERT_EQ(read_shape1_span.size(), shape1.size());
+    EXPECT_TRUE(std::equal(shape1.begin(), shape1.end(), read_shape1_span.begin()));
     ASSERT_EQ(chunk1_result->data(), data1);
 
     auto chunk2_result = reader->get_chunk(1);
     ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
-    ASSERT_EQ(chunk2_result->shape(), shape2);
+    auto read_shape2_span = chunk2_result->get_shape();
+    ASSERT_EQ(read_shape2_span.size(), shape2.size());
+    EXPECT_TRUE(std::equal(shape2.begin(), shape2.end(), read_shape2_span.begin()));
     ASSERT_EQ(chunk2_result->data(), data2);
 
     auto chunk3_result = reader->get_chunk(2);
     ASSERT_TRUE(chunk3_result.has_value()) << chunk3_result.error();
-    ASSERT_EQ(chunk3_result->shape(), shape3);
+    auto read_shape3_span = chunk3_result->get_shape();
+    ASSERT_EQ(read_shape3_span.size(), shape3.size());
+    EXPECT_TRUE(std::equal(shape3.begin(), shape3.end(), read_shape3_span.begin()));
     ASSERT_EQ(chunk3_result->data(), data3);
 }
 
 TEST_F(CddFileTest, AppendToExistingFile) {
     auto data1 = generate_random_data(512);
-    memory::vector<uint32_t> shape1 = {16, 32, 0}; // 16*32 = 512
+    memory::vector<int64_t> shape1 = {16, 32};
 
     // Create file with one chunk
     {
@@ -205,7 +231,7 @@ TEST_F(CddFileTest, AppendToExistingFile) {
 
     // Append a new chunk
     auto data2 = generate_random_data(1024);
-    memory::vector<uint32_t> shape2 = {32, 32, 0}; // 32*32 = 1024
+    memory::vector<int64_t> shape2 = {32, 32};
     {
         auto writer_result = DataWriter::open_for_append(test_filepath_); // Open for appending
         ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
@@ -222,12 +248,16 @@ TEST_F(CddFileTest, AppendToExistingFile) {
 
     auto chunk1_result = reader->get_chunk(0);
     ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
-    ASSERT_EQ(chunk1_result->shape(), shape1);
+    auto read_shape1_span = chunk1_result->get_shape();
+    ASSERT_EQ(read_shape1_span.size(), shape1.size());
+    EXPECT_TRUE(std::equal(shape1.begin(), shape1.end(), read_shape1_span.begin()));
     ASSERT_EQ(chunk1_result->data(), data1);
 
     auto chunk2_result = reader->get_chunk(1);
     ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
-    ASSERT_EQ(chunk2_result->shape(), shape2);
+    auto read_shape2_span = chunk2_result->get_shape();
+    ASSERT_EQ(read_shape2_span.size(), shape2.size());
+    EXPECT_TRUE(std::equal(shape2.begin(), shape2.end(), read_shape2_span.begin()));
     ASSERT_EQ(chunk2_result->data(), data2);
 }
 
@@ -236,10 +266,10 @@ TEST_F(CddFileTest, GetChunkSlice) {
     auto data2 = generate_random_data(200);
     auto data3 = generate_random_data(300);
     auto data4 = generate_random_data(400);
-    memory::vector<uint32_t> shape1 = {10, 10, 0};   // 100 bytes
-    memory::vector<uint32_t> shape2 = {10, 20, 0};   // 200 bytes
-    memory::vector<uint32_t> shape3 = {15, 20, 0};   // 300 bytes
-    memory::vector<uint32_t> shape4 = {20, 20, 0};   // 400 bytes
+    memory::vector<int64_t> shape1 = {10, 10};
+    memory::vector<int64_t> shape2 = {10, 20};
+    memory::vector<int64_t> shape3 = {15, 20};
+    memory::vector<int64_t> shape4 = {20, 20};
 
     // Write 4 chunks
     {
@@ -324,7 +354,7 @@ TEST_F(CddFileTest, MemoryBackendTest) {
 TEST_F(CddFileTest, InMemoryWriterToReader) {
     auto data1 = generate_random_data(100);
     auto data2 = generate_random_data(200);
-    memory::vector<uint32_t> shape = {10, 10, 0};
+    memory::vector<int64_t> shape = {10, 10};
 
     std::unique_ptr<storage::IStorageBackend> mem_backend;
 
@@ -393,7 +423,7 @@ TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
             for (size_t i = 0; i < total_chunks; ++i) {
                 auto data = generate_random_data(10 + i); // Varying sizes
                 original_data_chunks.push_back(data);
-                vector<uint32_t> shape = {static_cast<uint32_t>(data.size()), 0};
+                vector<int64_t> shape = {static_cast<int64_t>(data.size())};
                 ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data).has_value());
             }
             ASSERT_TRUE(writer->flush().has_value());
@@ -425,7 +455,7 @@ TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
             for (size_t i = 0; i < total_chunks; ++i) {
                 auto data = generate_random_data(10 + i);
                 original_data_chunks.push_back(data);
-                vector<uint32_t> shape = {static_cast<uint32_t>(data.size()), 0};
+                vector<int64_t> shape = {static_cast<int64_t>(data.size())};
                 ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, data).has_value());
             }
             ASSERT_TRUE(writer->flush().has_value());

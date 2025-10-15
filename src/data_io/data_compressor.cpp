@@ -20,7 +20,7 @@ namespace {
         std::expected<memory::vector<std::byte>, std::string>&& result,
         ChunkDataType type,
         DType dtype,
-        std::span<const uint32_t> shape)
+        std::span<const int64_t> shape)
     {
         if (!result) {
             return std::unexpected(CodecError::from_string(result.error(), ErrorCode::EncodingFailure));
@@ -116,8 +116,14 @@ DataCompressor& DataCompressor::operator=(DataCompressor&&) noexcept = default;
 
 
 DataCompressor::ChunkResult DataCompressor::compress_zstd(
-    std::span<const std::byte> data, std::span<const uint32_t> shape, DType dtype, int level) const
+    std::span<const std::byte> data, std::span<const int64_t> shape, DType dtype, int level) const
 {
+    for (const auto dim : shape) {
+        if (dim < 0) {
+            return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Shape dimensions cannot be negative."});
+        }
+    }
+
     // Zstd is simple and stateless enough to create on the stack without caching.
     ZstdCompressor compressor(level);
     auto compressed_result = compressor.compress(data);
@@ -166,7 +172,7 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
             return std::unexpected(CodecError{ErrorCode::InvalidDataType, "Unsupported or mismatched chunk type for 1D float data."});
     }
 
-    const uint32_t shape_val = static_cast<uint32_t>(data.size());
+    const int64_t shape_val = static_cast<int64_t>(data.size());
     return create_chunk_from_result(std::move(encoded_result),
         type, DType::FLOAT32, {&shape_val, 1});
 }
@@ -190,23 +196,29 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
             return std::unexpected(CodecError{ErrorCode::InvalidDataType, "Unsupported or mismatched chunk type for 1D int64 data."});
     }
 
-    const uint32_t shape_val = static_cast<uint32_t>(data.size());
+    const int64_t shape_val = static_cast<int64_t>(data.size());
     return create_chunk_from_result(std::move(encoded_result),
         type, DType::INT64, {&shape_val, 1});
 }
 
 DataCompressor::ChunkResult DataCompressor::compress_chunk(
-    std::span<const float> data, ChunkDataType type, std::span<const uint32_t> shape, std::span<const float> prev_state, int level) const
+    std::span<const float> data, ChunkDataType type, std::span<const int64_t> shape, std::span<const float> prev_state, int level) const
 {
     std::expected<memory::vector<std::byte>, std::string> encoded_result;
+
+    for (const auto dim : shape) {
+        if (dim < 0) {
+            return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Shape dimensions cannot be negative."});
+        }
+    }
 
     switch (type) {
         case ChunkDataType::GENERIC_OB_SIMD_F16_AS_F32:
         case ChunkDataType::GENERIC_OB_SIMD_F32:
         {
             if (shape.size() != 3) return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Orderbook data requires a 3D shape."});
-            const size_t depth = shape[1];
-            const size_t features = shape[2];
+            const size_t depth = static_cast<size_t>(shape[1]);
+            const size_t features = static_cast<size_t>(shape[2]);
             auto& codec = pimpl_->get_ob_codec(depth, features, level);
             
             std::lock_guard lock(pimpl_->ob_workspace_mutex_);
@@ -221,7 +233,7 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
         case ChunkDataType::TEMPORAL_2D_SIMD_F32:
         {
             if (shape.size() != 2) return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Temporal 2D data requires a 2D shape."});
-            const size_t num_features = shape[1];
+            const size_t num_features = static_cast<size_t>(shape[1]);
             auto& codec = pimpl_->get_t2d_codec(num_features, level);
 
             std::lock_guard lock(pimpl_->temporal_2d_workspace_mutex_);
@@ -240,16 +252,22 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
 }
 
 DataCompressor::ChunkResult DataCompressor::compress_chunk(
-    std::span<const int64_t> data, ChunkDataType type, std::span<const uint32_t> shape, std::span<const int64_t> prev_row, int level) const
+    std::span<const int64_t> data, ChunkDataType type, std::span<const int64_t> shape, std::span<const int64_t> prev_row, int level) const
 {
     if (shape.size() != 2) return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Temporal 2D int64 data requires a 2D shape."});
     
+    for (const auto dim : shape) {
+        if (dim < 0) {
+            return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Shape dimensions cannot be negative."});
+        }
+    }
+
     std::expected<memory::vector<std::byte>, std::string> encoded_result;
 
     switch (type) {
         case ChunkDataType::TEMPORAL_2D_SIMD_I64:
         {
-            const size_t num_features = shape[1];
+            const size_t num_features = static_cast<size_t>(shape[1]);
             auto& codec = pimpl_->get_t2d_codec(num_features, level);
             
             std::lock_guard lock(pimpl_->temporal_2d_workspace_mutex_);

@@ -130,8 +130,12 @@ std::expected<Chunk, std::string> DataReader::get_chunk(const size_t index) {
 
         // --- REGRESSION FIX: Validate decompressed size ---
         size_t num_elements = 1;
-        for (const uint32_t dim : chunk.get_shape()) {
-            num_elements *= dim;
+        for (const int64_t dim : chunk.get_shape()) {
+            if (dim < 0) {
+                return std::unexpected(std::format(
+                    "Chunk {} has a negative shape dimension ({}). File may be corrupt.", index, dim));
+            }
+            num_elements *= static_cast<size_t>(dim);
         }
         const size_t element_size = get_dtype_size(chunk.dtype());
         if (element_size == 0) {

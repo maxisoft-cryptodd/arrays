@@ -175,7 +175,7 @@ public:
     /**
      * @brief Returns a view of the chunk's shape, excluding the null terminator used for file format compatibility.
      */
-    [[nodiscard]] std::span<const uint32_t> get_shape() const;
+    [[nodiscard]] std::span<const int64_t> get_shape() const;
     /** @brief Calculates the total number of elements in the chunk based on its shape. */
     [[nodiscard]] size_t num_elements() const;
     /** @brief Calculates the expected size of the raw data in bytes based on dtype and shape. */
@@ -190,7 +190,7 @@ public:
     [[nodiscard]] DType dtype() const { return dtype_; }
     [[nodiscard]] const blake3_hash128_t& hash() const { return hash_; }
     [[nodiscard]] uint64_t flags() const { return flags_; }
-    [[nodiscard]] const memory::vector<uint32_t>& shape() const { return shape_; }
+    [[nodiscard]] const memory::vector<int64_t>& shape() const { return shape_; }
     [[nodiscard]] const memory::vector<std::byte>& data() const { return data_; }
     /** @brief Gets a mutable reference to the chunk's data vector. */
     [[nodiscard]] memory::vector<std::byte>& data() { return data_; }
@@ -201,9 +201,9 @@ public:
     void set_dtype(DType dtype) { dtype_ = dtype; }
     void set_hash(const blake3_hash128_t& hash) { hash_ = hash; }
     void set_flags(uint64_t flags) { flags_ = flags; }
-    void set_shape(memory::vector<uint32_t> shape) { shape_ = std::move(shape); }
+    void set_shape(memory::vector<int64_t> shape) { shape_ = std::move(shape); }
     /** @brief Sets the chunk's data, taking ownership of the provided vector. */
-    void set_data(memory::vector<std::byte> data) { data_ = std::move(data); }
+    void set_data(memory::vector<std::byte>&& data) { data_ = std::move(data); }
 
     std::expected<void, std::string> write(IStorageBackend& backend) const;
     std::expected<void, std::string> read(IStorageBackend& backend);
@@ -214,7 +214,7 @@ private:
     DType dtype_{};
     blake3_hash128_t hash_{};
     uint64_t flags_{};
-    memory::vector<uint32_t> shape_;
+    memory::vector<int64_t> shape_;
     memory::vector<std::byte> data_;
 };
 
