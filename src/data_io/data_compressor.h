@@ -59,7 +59,7 @@ class DataCompressor
      */
     [[nodiscard]] ChunkResult compress_zstd(
         std::span<const std::byte> data,
-        std::span<const uint32_t> shape,
+        std::span<const int64_t> shape,
         DType dtype,
         int level = ZstdCompressor::DEFAULT_COMPRESSION_LEVEL
     ) const;
@@ -124,7 +124,7 @@ class DataCompressor
     [[nodiscard]] ChunkResult compress_chunk(
         std::span<const float> data,
         ChunkDataType type,
-        std::span<const uint32_t> shape,
+        std::span<const int64_t> shape,
         std::span<const float> prev_state,
         int level = ZstdCompressor::DEFAULT_COMPRESSION_LEVEL
     ) const;
@@ -141,7 +141,7 @@ class DataCompressor
     [[nodiscard]] ChunkResult compress_chunk(
         std::span<const int64_t> data,
         ChunkDataType type,
-        std::span<const uint32_t> shape,
+        std::span<const int64_t> shape,
         std::span<const int64_t> prev_row,
         int level = ZstdCompressor::DEFAULT_COMPRESSION_LEVEL
     ) const;
