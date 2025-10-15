@@ -21,11 +21,15 @@ public:
     ZstdCompressor(ZstdCompressor&&) noexcept;
     ZstdCompressor& operator=(ZstdCompressor&&) noexcept;
 
-    // --- Interface Implementation ---
-    std::expected<memory::vector<std::byte>, std::string> compress(std::span<const std::byte> uncompressed_data) override;
-    std::expected<memory::vector<std::byte>, std::string> decompress(std::span<const std::byte> compressed_data) override;
-
     void set_level(int level);
+
+protected:
+    // Implement the new protected virtual interface from ICompressor
+    size_t do_get_compress_bound(std::span<const std::byte> uncompressed_data) override;
+    std::expected<size_t, std::string> do_get_decompress_size(std::span<const std::byte> compressed_data) override;
+    
+    std::expected<size_t, std::string> do_compress_into(std::span<const std::byte> uncompressed, std::span<std::byte> compressed) override;
+    std::expected<size_t, std::string> do_decompress_into(std::span<const std::byte> compressed, std::span<std::byte> decompressed) override;
 
 private:
     struct Impl;

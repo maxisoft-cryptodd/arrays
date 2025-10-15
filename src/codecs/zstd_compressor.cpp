@@ -65,59 +65,46 @@ ZstdCompressor::~ZstdCompressor() = default;
 ZstdCompressor::ZstdCompressor(ZstdCompressor&&) noexcept = default;
 ZstdCompressor& ZstdCompressor::operator=(ZstdCompressor&&) noexcept = default;
 
-std::expected<memory::vector<std::byte>, std::string> ZstdCompressor::compress(std::span<const std::byte> uncompressed_data)
-{
-    const size_t compressed_bound = ZSTD_compressBound(uncompressed_data.size());
-    memory::vector<std::byte> compressed_data(compressed_bound);
-
-    const size_t compressed_size = pimpl_->cdict
-        ? ZSTD_compress_usingCDict(pimpl_->cctx.get(), compressed_data.data(), compressed_data.size(),
-                                   uncompressed_data.data(), uncompressed_data.size(), pimpl_->cdict.get())
-        : ZSTD_compressCCtx(pimpl_->cctx.get(), compressed_data.data(), compressed_data.size(),
-                            uncompressed_data.data(), uncompressed_data.size(), pimpl_->compression_level);
-
-    if (ZSTD_isError(compressed_size))
-    {
-        return std::unexpected(std::format("ZSTD compression failed: {}", ZSTD_getErrorName(compressed_size)));
-    }
-    compressed_data.resize(compressed_size);
-    return compressed_data;
+size_t ZstdCompressor::do_get_compress_bound(const std::span<const std::byte> uncompressed_data) {
+    return ZSTD_compressBound(uncompressed_data.size_bytes());
 }
 
-std::expected<memory::vector<std::byte>, std::string> ZstdCompressor::decompress(std::span<const std::byte> compressed_data)
-{
-    const unsigned long long decompressed_size =
-        ZSTD_getFrameContentSize(compressed_data.data(), compressed_data.size());
+std::expected<size_t, std::string> ZstdCompressor::do_get_decompress_size(std::span<const std::byte> compressed_data) {
+    const unsigned long long decompressed_size = ZSTD_getFrameContentSize(compressed_data.data(), compressed_data.size());
 
-    if (decompressed_size == ZSTD_CONTENTSIZE_ERROR)
-    {
+    if (decompressed_size == ZSTD_CONTENTSIZE_ERROR) {
         return std::unexpected("Invalid ZSTD frame: content size error.");
     }
-    if (decompressed_size == ZSTD_CONTENTSIZE_UNKNOWN)
-    {
+    if (decompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
         return std::unexpected("Cannot decompress ZSTD frame with unknown content size.");
     }
+    return static_cast<size_t>(decompressed_size);
+}
 
-    memory::vector<std::byte> decompressed_data(decompressed_size);
+std::expected<size_t, std::string> ZstdCompressor::do_compress_into(std::span<const std::byte> uncompressed, std::span<std::byte> compressed) {
+    const size_t compressed_size = pimpl_->cdict
+        ? ZSTD_compress_usingCDict(pimpl_->cctx.get(), compressed.data(), compressed.size(),
+                                   uncompressed.data(), uncompressed.size(), pimpl_->cdict.get())
+        : ZSTD_compressCCtx(pimpl_->cctx.get(), compressed.data(), compressed.size(),
+                            uncompressed.data(), uncompressed.size(), pimpl_->compression_level);
 
+    if (ZSTD_isError(compressed_size)) {
+        return std::unexpected(std::format("ZSTD compression failed: {}", ZSTD_getErrorName(compressed_size)));
+    }
+    return compressed_size;
+}
+
+std::expected<size_t, std::string> ZstdCompressor::do_decompress_into(std::span<const std::byte> compressed, std::span<std::byte> decompressed) {
     const size_t result_size = pimpl_->ddict
-        ? ZSTD_decompress_usingDDict(pimpl_->dctx.get(), decompressed_data.data(), decompressed_data.size(),
-                                     compressed_data.data(), compressed_data.size(), pimpl_->ddict.get())
-        : ZSTD_decompressDCtx(pimpl_->dctx.get(), decompressed_data.data(), decompressed_data.size(),
-                              compressed_data.data(), compressed_data.size());
+        ? ZSTD_decompress_usingDDict(pimpl_->dctx.get(), decompressed.data(), decompressed.size(),
+                                     compressed.data(), compressed.size(), pimpl_->ddict.get())
+        : ZSTD_decompressDCtx(pimpl_->dctx.get(), decompressed.data(), decompressed.size(),
+                              compressed.data(), compressed.size());
 
-    if (ZSTD_isError(result_size))
-    {
+    if (ZSTD_isError(result_size)) {
         return std::unexpected(std::format("ZSTD decompression failed: {}", ZSTD_getErrorName(result_size)));
     }
-
-    if (result_size != decompressed_size)
-    {
-        return std::unexpected(
-            std::format("ZSTD decompression size mismatch. Expected {}, got {}.", decompressed_size, result_size));
-    }
-
-    return decompressed_data;
+    return result_size;
 }
 
 void ZstdCompressor::set_level(const int level)
