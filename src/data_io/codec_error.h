@@ -9,6 +9,8 @@ namespace cryptodd {
 enum class ErrorCode {
     Unknown,
     DecompressionFailure,
+    CompressionFailure,
+    EncodingFailure,
     InvalidChunkShape,
     InvalidDataType,
     InvalidDataSize,
@@ -20,6 +22,8 @@ enum class ErrorCode {
     switch (code) {
         case ErrorCode::Unknown: return "Unknown";
         case ErrorCode::DecompressionFailure: return "DecompressionFailure";
+        case ErrorCode::CompressionFailure: return "CompressionFailure";
+        case ErrorCode::EncodingFailure: return "EncodingFailure";
         case ErrorCode::InvalidChunkShape: return "InvalidChunkShape";
         case ErrorCode::InvalidDataType: return "InvalidDataType";
         case ErrorCode::InvalidDataSize: return "InvalidDataSize";
