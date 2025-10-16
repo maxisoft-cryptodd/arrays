@@ -14,10 +14,22 @@ namespace cryptodd
 
 namespace details
 {
-inline constexpr size_t HWY_ALIGNMENT = 128; // expected, need to set to current highway value
-using Float32AlignedVector = memory::AlignedVector<float, HWY_ALIGNMENT>;
-using ByteAlignedVector = memory::AlignedVector<std::byte, HWY_ALIGNMENT>;
-using Int64AlignedVector = memory::AlignedVector<int64_t, HWY_ALIGNMENT>;
+// ReSharper disable once CppRedundantCastExpression
+inline constexpr size_t _DEFAULT_HWY_ALIGNMENT = static_cast<size_t>( // NOLINT(*-reserved-identifier)
+#ifdef USER_HWY_ALIGNMENT
+USER_HWY_ALIGNMENT
+#elifdef HWY_ALIGNMENT
+HWY_ALIGNMENT
+#else
+128
+#endif
+    ); // expected, need to set to current highway value
+
+static_assert(_DEFAULT_HWY_ALIGNMENT > 0);
+
+using Float32AlignedVector = memory::AlignedVector<float, _DEFAULT_HWY_ALIGNMENT>;
+using ByteAlignedVector = memory::AlignedVector<std::byte, _DEFAULT_HWY_ALIGNMENT>;
+using Int64AlignedVector = memory::AlignedVector<int64_t, _DEFAULT_HWY_ALIGNMENT>;
 }
 
 using vect_variant = std::variant<memory::vector<uint8_t>,
@@ -49,7 +61,10 @@ class Buffer
     explicit Buffer(memory::vector<int64_t> &&data) : m_data(std::move(data))
     {
     }
-    explicit Buffer(memory::vector<std::byte> &&data) : m_data(std::move(data)) {}
+
+    explicit Buffer(memory::vector<std::byte> &&data) : m_data(std::move(data))
+    {
+    }
 
 
     explicit Buffer(details::Float32AlignedVector &&data) : m_data(std::move(data))
@@ -138,7 +153,7 @@ class Buffer
                 else if constexpr (std::is_same_v<T, int64_t>)
                     return DType::INT64;
                 else if constexpr (std::is_same_v<T, std::byte>)
-                    return DType::UINT8;
+                    return DType::UINT8; // NOLINT(*-branch-clone)
 
                 std::unreachable();
             },
