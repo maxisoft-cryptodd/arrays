@@ -139,7 +139,9 @@ add_executable(cryptodd_arrays_test
         test/codecs/temporal_1d_simd_codec_test.cpp
         test/codecs/temporal_2d_simd_codec_test.cpp
         test/storage/storage_backend_tests.cpp
-        test/test_helpers.cpp)
+        test/test_helpers.cpp
+        test/data_io/buffer_test.cpp
+)
 target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
 if(USE_MIMALLOC)
     target_compile_definitions(cryptodd_arrays_test PUBLIC USE_MIMALLOC)
