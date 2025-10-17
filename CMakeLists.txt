@@ -56,10 +56,12 @@ add_library(cryptodd_arrays_lib STATIC
     src/storage/memory_backend.cpp
     src/data_io/buffer.cpp
     src/storage/mio_backend.cpp
-        src/data_io/data_extractor.cpp
-        src/data_io/data_compressor.cpp
-        src/c_api/cdd_context.cpp
-        src/c_api/c_api.cpp
+    src/data_io/data_extractor.cpp
+    src/data_io/data_compressor.cpp
+    src/c_api/cdd_context.cpp
+    src/c_api/c_api.cpp
+    src/c_api/c_api_utils.cpp
+    src/c_api/store_chunk_handler.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
