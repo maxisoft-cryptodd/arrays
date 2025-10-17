@@ -51,7 +51,6 @@ add_library(cryptodd_arrays_lib STATIC
     src/codecs/orderbook_simd_codec.cpp
     src/codecs/temporal_1d_simd_codec.cpp
     src/codecs/temporal_2d_simd_codec.cpp
-    #src/data_io/data_extractor.cpp
     src/file_format/cdd_file_format.cpp
     src/storage/file_backend.cpp
     src/storage/memory_backend.cpp
@@ -59,6 +58,8 @@ add_library(cryptodd_arrays_lib STATIC
     src/storage/mio_backend.cpp
         src/data_io/data_extractor.cpp
         src/data_io/data_compressor.cpp
+        src/c_api/cdd_context.cpp
+        src/c_api/c_api.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
@@ -68,12 +69,13 @@ target_compile_definitions(cryptodd_arrays_lib PRIVATE HWY_EXPORT_AND_DYNAMIC_DI
 
 target_include_directories(cryptodd_arrays_lib PUBLIC
     "${CMAKE_BINARY_DIR}"
-        "${CMAKE_BINARY_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_SOURCE_DIR}/src/storage"
     "${CMAKE_SOURCE_DIR}/src/file_format"
     "${CMAKE_SOURCE_DIR}/src/data_io"
     "${CMAKE_SOURCE_DIR}/src/codecs"
     "${CMAKE_SOURCE_DIR}/src/memory"
+        "${CMAKE_SOURCE_DIR}/src/c_api"
 )
 
 # Link dependencies

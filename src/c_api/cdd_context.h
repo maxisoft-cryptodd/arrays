@@ -1,8 +1,8 @@
 #pragma once
 
-#include "data_io/data_reader.h"
-#include "data_io/data_writer.h"
-#include "storage/i_storage_backend.h"
+#include "../data_io/data_reader.h"
+#include "../data_io/data_writer.h"
+#include "../storage/i_storage_backend.h"
 #include <nlohmann/json.hpp>
 #include <expected>
 #include <memory>
@@ -10,13 +10,23 @@
 
 namespace cryptodd::ffi {
 
+class ExpectedError
+{
+std::string m_message;
+public:
+    explicit ExpectedError(std::string message) : m_message(std::move(message))
+    {
+    }
+    const std::string& message() {return m_message;}
+};
+
 class CddContext {
 public:
     // Factory function to create a context from JSON configuration
-    static std::expected<std::unique_ptr<CddContext>, std::string> create(const nlohmann::json& config);
+    static std::expected<std::unique_ptr<CddContext>, ExpectedError> create(const nlohmann::json& config);
 
     // Main execution entry point for this context
-    std::expected<nlohmann::json, std::string> execute_operation(
+    std::expected<nlohmann::json, ExpectedError> execute_operation(
         const nlohmann::json& op_request,
         std::span<const std::byte> input_data,
         std::span<std::byte> output_data
