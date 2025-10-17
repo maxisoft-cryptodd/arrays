@@ -2,15 +2,20 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "cryptodd_arrays_lib_export.h"
 
-#ifdef _WIN32
-    #ifdef CRYPTODD_DLL_EXPORTS
-        #define CRYPTODD_API __declspec(dllexport)
-    #else
-        #define CRYPTODD_API __declspec(dllimport)
-    #endif
+#ifdef CRYPTODD_ARRAYS_LIB_EXPORT
+#define CRYPTODD_API CRYPTODD_ARRAYS_LIB_EXPORT
 #else
-    #define CRYPTODD_API __attribute__((visibility("default")))
+#ifdef _WIN32
+#ifdef CRYPTODD_DLL_EXPORTS
+#define CRYPTODD_API __declspec(dllexport)
+#else
+#define CRYPTODD_API __declspec(dllimport)
+#endif
+#else
+#define CRYPTODD_API __attribute__((visibility("default")))
+#endif
 #endif
 
 
@@ -20,11 +25,7 @@ extern "C" {
 
 // Opaque handle to a CddContext instance.
 // Using a specific type for clarity and to avoid potential conflicts with intptr_t.
-#if defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__)
-typedef int64_t cdd_handle_t;
-#else
-typedef int32_t cdd_handle_t;
-#endif
+    typedef int64_t cdd_handle_t;
 
 // Error Codes
 enum {
@@ -43,13 +44,11 @@ enum {
  *
  * @param json_config A UTF-8 encoded JSON string configuring the backend.
  * @param config_len Length of the JSON string in bytes.
- * @param out_handle A pointer to receive the opaque context handle on success.
- * @return int64_t 0 on success, negative error code on failure.
+ * @return cdd_handle_t a positive integer handle on success, negative error code on failure.
  */
-CRYPTODD_API int64_t cdd_context_create(
+CRYPTODD_API cdd_handle_t cdd_context_create(
     const char* json_config,
-    size_t config_len,
-    cdd_handle_t* out_handle
+    size_t config_len
 );
 
 /**

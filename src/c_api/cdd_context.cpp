@@ -1,9 +1,12 @@
 #include "cdd_context.h"
-#include "data_io/data_reader.h"
-#include "data_io/data_writer.h"
-#include "storage/file_backend.h"
-#include "storage/memory_backend.h"
+
+#include <iostream>
+
 #include <string>
+#include "../data_io/data_reader.h"
+#include "../data_io/data_writer.h"
+#include "../storage/file_backend.h"
+#include "../storage/memory_backend.h"
 
 namespace cryptodd::ffi {
 
@@ -15,11 +18,15 @@ CddContext::CddContext(
 CddContext::~CddContext() {
     if (writer_) {
         // Ensure data is flushed on context destruction
-        writer_->flush();
+        if (auto flushed = writer_->flush(); !flushed)
+        {
+            // TODO log error
+            std::cerr << "Error flushing data: " << flushed.error() << std::endl;
+        }
     }
 }
 
-std::expected<std::unique_ptr<CddContext>, std::string> CddContext::create(const nlohmann::json& config) {
+std::expected<std::unique_ptr<CddContext>, ExpectedError> CddContext::create(const nlohmann::json& config) {
     try {
         const auto& backend_config = config.at("backend");
         const auto type = backend_config.at("type").get<std::string>();
@@ -29,10 +36,10 @@ std::expected<std::unique_ptr<CddContext>, std::string> CddContext::create(const
         std::unique_ptr<DataWriter> writer;
 
         if (mode_str == "Read") {
-            if (type != "File") return std::unexpected("Read mode currently only supports File backend.");
+            if (type != "File") return std::unexpected(ExpectedError("Read mode currently only supports File backend."));
             const auto path = backend_config.at("path").get<std::string>();
             auto reader_result = DataReader::open(path);
-            if (!reader_result) return std::unexpected(reader_result.error());
+            if (!reader_result) return std::unexpected(ExpectedError(reader_result.error()));
             reader = std::move(*reader_result);
         } else { // WriteAppend or WriteTruncate
             size_t capacity = 1024;
@@ -51,24 +58,24 @@ std::expected<std::unique_ptr<CddContext>, std::string> CddContext::create(const
                     writer_result = DataWriter::create_new(path, capacity, user_metadata);
                 }
             } else if (type == "Memory") {
-                if (mode_str != "WriteTruncate") return std::unexpected("Memory backend only supports WriteTruncate mode.");
+                if (mode_str != "WriteTruncate") return std::unexpected(ExpectedError("Memory backend only supports WriteTruncate mode."));
                 writer_result = DataWriter::create_in_memory(capacity, user_metadata);
             } else {
-                 return std::unexpected("Unsupported backend type for writing: " + type);
+                 return std::unexpected(ExpectedError("Unsupported backend type for writing: " + type));
             }
 
-            if(!writer_result) return std::unexpected(writer_result.error());
+            if(!writer_result) return std::unexpected(ExpectedError(writer_result.error()));
             writer = std::move(*writer_result);
         }
         
         return std::unique_ptr<CddContext>(new CddContext(std::move(reader), std::move(writer)));
 
     } catch(const nlohmann::json::exception& e) {
-        return std::unexpected(std::string("JSON configuration error: ") + e.what());
+        return std::unexpected(ExpectedError(std::string("JSON configuration error: ") + e.what()));
     }
 }
 
-std::expected<nlohmann::json, std::string> CddContext::execute_operation(
+std::expected<nlohmann::json, ExpectedError> CddContext::execute_operation(
     const nlohmann::json& op_request,
     std::span<const std::byte> /*input_data*/,
     std::span<std::byte> /*output_data*/
@@ -81,10 +88,10 @@ std::expected<nlohmann::json, std::string> CddContext::execute_operation(
             result["message"] = "Pong";
             return result;
         } else {
-            return std::unexpected("Unknown or unsupported op_type: " + op_type);
+            return std::unexpected(ExpectedError("Unknown or unsupported op_type: " + op_type));
         }
     } catch(const nlohmann::json::exception& e) {
-        return std::unexpected(std::string("JSON request error: ") + e.what());
+        return std::unexpected(ExpectedError(std::string("JSON request error: ") + e.what()));
     }
 }
 

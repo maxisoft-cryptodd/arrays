@@ -1,5 +1,5 @@
-#include "include/cryptodd/c_api.h"
-#include "c_api/cdd_context.h"
+#include "cryptodd/c_api.h"
+#include "../c_api/cdd_context.h"
 
 #include <nlohmann/json.hpp>
 #include <unordered_map>
@@ -49,8 +49,8 @@ CRYPTODD_API const char* cdd_error_message(int64_t error_code) {
     return error_code_to_message(error_code);
 }
 
-CRYPTODD_API int64_t cdd_context_create(const char* json_config, size_t config_len, cdd_handle_t* out_handle) {
-    if (!json_config || !out_handle) {
+CRYPTODD_API cdd_handle_t cdd_context_create(const char* json_config, size_t config_len) {
+    if (!json_config) {
         return CDD_ERROR_INVALID_ARGUMENT;
     }
 
@@ -64,13 +64,32 @@ CRYPTODD_API int64_t cdd_context_create(const char* json_config, size_t config_l
             return CDD_ERROR_RESOURCE_UNAVAILABLE;
         }
         
-        cdd_handle_t handle = g_next_handle.fetch_add(1);
+        cdd_handle_t handle = 0;
+        auto contains_handle = [] (cdd_handle_t h)
         {
             std::lock_guard lock(g_context_map_mutex);
+            return g_contexts.contains(h);
+        };
+
+        do
+        {
+            handle = g_next_handle.fetch_add(1);
+            if (handle < 0)
+            {
+                g_next_handle.compare_exchange_strong(handle, 1);
+            }
+        } while (handle <= 0 || contains_handle(handle));
+
+
+        assert(!contains_handle(handle));
+        {
+            std::lock_guard lock(g_context_map_mutex);
+
             g_contexts[handle] = std::move(*context_result);
         }
-        *out_handle = handle;
-        return CDD_SUCCESS;
+
+        assert(handle > 0);
+        return handle;
 
     } catch (const nlohmann::json::parse_error&) {
         return CDD_ERROR_INVALID_JSON;
@@ -115,8 +134,7 @@ CRYPTODD_API int64_t cdd_execute_op(
         nlohmann::json request_json = nlohmann::json::parse(std::string_view(json_op_request, request_len));
 
         std::unique_lock lock(g_context_map_mutex);
-        auto it = g_contexts.find(handle);
-        if (it == g_contexts.end()) {
+        if (auto it = g_contexts.find(handle); it == g_contexts.end()) {
             lock.unlock();
             response_str = create_error_json(CDD_ERROR_INVALID_HANDLE, cdd_error_message(CDD_ERROR_INVALID_HANDLE)).dump();
             final_status_code = CDD_ERROR_INVALID_HANDLE;
@@ -135,7 +153,7 @@ CRYPTODD_API int64_t cdd_execute_op(
                 final_response = {{"status", "Success"}, {"result", *op_result}};
                 final_status_code = CDD_SUCCESS;
             } else {
-                final_response = create_error_json(CDD_ERROR_OPERATION_FAILED, op_result.error());
+                final_response = create_error_json(CDD_ERROR_OPERATION_FAILED, op_result.error().message());
                 final_status_code = CDD_ERROR_OPERATION_FAILED;
             }
             response_str = final_response.dump();
