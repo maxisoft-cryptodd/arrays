@@ -62,6 +62,8 @@ add_library(cryptodd_arrays_lib STATIC
     src/c_api/c_api.cpp
     src/c_api/c_api_utils.cpp
     src/c_api/store_chunk_handler.cpp
+        src/c_api/store_array_handler.cpp
+        src/c_api/store_op_handler_base.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
