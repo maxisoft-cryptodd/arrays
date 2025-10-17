@@ -1,10 +1,10 @@
 #pragma once
 
-#include "../c_api/store_op_handler_base.h" // Changed from operation_handler.h
+#include "../c_api/store_op_handler_base.h"
 
 namespace cryptodd::ffi {
 
-class StoreChunkHandler final : public StoreOperationHandlerBase { // Changed base class
+class StoreArrayHandler final : public StoreOperationHandlerBase {
 public:
     std::expected<nlohmann::json, ExpectedError> execute(
         CddContext& context,
@@ -13,4 +13,4 @@ public:
         std::span<const std::byte> output_data) override;
 };
 
-}
+} // namespace cryptodd::ffi
