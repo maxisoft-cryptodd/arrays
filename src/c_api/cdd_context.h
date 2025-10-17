@@ -2,11 +2,15 @@
 
 #include "../data_io/data_reader.h"
 #include "../data_io/data_writer.h"
-#include "../storage/i_storage_backend.h"
+#include "../data_io/data_compressor.h"
 #include <nlohmann/json.hpp>
 #include <expected>
 #include <memory>
+#include <map>
+#include <mutex>
 #include <span>
+#include <optional>
+#include <functional>
 
 namespace cryptodd::ffi {
 
@@ -22,30 +26,43 @@ public:
 
 class CddContext {
 public:
-    // Factory function to create a context from JSON configuration
     static std::expected<std::unique_ptr<CddContext>, ExpectedError> create(const nlohmann::json& config);
 
-    // Main execution entry point for this context
     std::expected<nlohmann::json, ExpectedError> execute_operation(
         const nlohmann::json& op_request,
         std::span<const std::byte> input_data,
-        std::span<std::byte> output_data
+        std::span<const std::byte> output_data
     );
 
-    // Explicitly non-copyable
+    // Getters for handlers
+    std::optional<std::reference_wrapper<DataWriter>> get_writer();
+    std::optional<std::reference_wrapper<DataReader>> get_reader();
+    DataCompressor& get_compressor() { return compressor_; }
+    
+    // Method to get a zero-filled span for initial codec states, with caching.
+    std::span<const std::byte> get_zero_state(size_t byte_size);
+
     CddContext(const CddContext&) = delete;
     CddContext& operator=(const CddContext&) = delete;
     CddContext(CddContext&&) = default;
     CddContext& operator=(CddContext&&) = default;
-    
     ~CddContext();
 
 private:
-    // Private constructor, use factory
-    CddContext(std::unique_ptr<DataReader> reader, std::unique_ptr<DataWriter> writer);
 
     std::unique_ptr<DataReader> reader_;
     std::unique_ptr<DataWriter> writer_;
+    DataCompressor compressor_; // Reusable compressor
+
+    // Cache for zero-initialized previous states to avoid repeated allocations.
+    std::map<size_t, memory::vector<std::byte>> zero_state_cache_;
+    std::mutex zero_state_cache_mutex_;
+
+protected:
+    struct ProtectedMarker{};
+
+public:
+    CddContext(ProtectedMarker, std::unique_ptr<DataReader>&& reader, std::unique_ptr<DataWriter>&& writer);
 };
 
 } // namespace cryptodd::ffi
