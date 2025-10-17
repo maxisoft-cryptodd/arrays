@@ -68,6 +68,7 @@ target_compile_definitions(cryptodd_arrays_lib PRIVATE HWY_EXPORT_AND_DYNAMIC_DI
 
 target_include_directories(cryptodd_arrays_lib PUBLIC
     "${CMAKE_BINARY_DIR}"
+        "${CMAKE_BINARY_DIR}/include"
     "${CMAKE_SOURCE_DIR}/src/storage"
     "${CMAKE_SOURCE_DIR}/src/file_format"
     "${CMAKE_SOURCE_DIR}/src/data_io"
@@ -83,6 +84,7 @@ find_package(stduuid CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
 find_package(mio CONFIG REQUIRED)
 find_package(mimalloc CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
@@ -98,6 +100,7 @@ target_link_libraries(cryptodd_arrays_lib PUBLIC
         stduuid
         hwy::hwy
         mio::mio mio::mio-headers
+        nlohmann_json::nlohmann_json
 )
 
 # Conditionally add and link mimalloc
@@ -116,6 +119,7 @@ set_target_properties(cryptodd_arrays_shared PROPERTIES OUTPUT_NAME "cryptodd_ar
 target_link_libraries(cryptodd_arrays_shared PRIVATE cryptodd_arrays_lib)
 
 # This creates cryptodd_arrays_export.h and defines CRYPTODD_ARRAYS_API
+GENERATE_EXPORT_HEADER(cryptodd_arrays_lib)
 GENERATE_EXPORT_HEADER(cryptodd_arrays_shared)
 
 target_include_directories(cryptodd_arrays_shared PUBLIC
