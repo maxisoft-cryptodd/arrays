@@ -4,6 +4,8 @@
 #include "../codecs/temporal_1d_simd_codec.h"
 #include "../codecs/temporal_2d_simd_codec.h"
 #include "../codecs/zstd_compressor.h"
+#include "../codecs/codec_constants.h" // For codecs::Orderbook::OKX_DEPTH, etc.
+#include <bit> // For std::endian
 
 #include <map>
 #include <mutex>
@@ -20,7 +22,8 @@ namespace {
         std::expected<memory::vector<std::byte>, std::string>&& result,
         ChunkDataType type,
         DType dtype,
-        std::span<const int64_t> shape)
+        std::span<const int64_t> shape,
+        uint64_t flags)
     {
         if (!result) {
             return std::unexpected(CodecError::from_string(result.error(), ErrorCode::EncodingFailure));
@@ -30,6 +33,16 @@ namespace {
         chunk->set_dtype(dtype);
         chunk->set_shape({shape.begin(), shape.end()});
         chunk->set_data(std::move(*result));
+        
+        if constexpr (std::endian::native == std::endian::little)
+        {
+            flags |= ChunkFlags::LITTLE_ENDIAN;
+        }
+        else if constexpr (std::endian::native == std::endian::big)
+        {
+            flags |= ChunkFlags::BIG_ENDIAN;
+        }
+        chunk->set_flags(flags);
         return chunk;
     }
 }
@@ -67,6 +80,13 @@ struct DataCompressor::Impl
     mutable std::map<T2dCodecKey, DynamicTemporal2dSimdCodec> t2d_codecs_cache_;
     mutable std::mutex t2d_cache_mutex_;
 
+    // Key: <level>
+    mutable std::map<int, OkxObSimdCodec> okx_ob_codecs_cache_;
+    mutable std::mutex okx_ob_cache_mutex_;
+
+    // Key: <level>
+    mutable std::map<int, BinanceObSimdCodec> binance_ob_codecs_cache_;
+    mutable std::mutex binance_ob_cache_mutex_;
     
     // --- Cache Accessor Methods ---
 
@@ -78,6 +98,28 @@ struct DataCompressor::Impl
         auto it = ob_codecs_cache_.find(key);
         if (it == ob_codecs_cache_.end()) {
             it = ob_codecs_cache_.try_emplace(key, depth, features, std::make_unique<ZstdCompressor>(level)).first;
+        }
+        return it->second;
+    }
+
+    [[nodiscard]] OkxObSimdCodec& get_okx_ob_codec(int level) const
+    {
+        std::lock_guard lock(okx_ob_cache_mutex_);
+
+        auto it = okx_ob_codecs_cache_.find(level);
+        if (it == okx_ob_codecs_cache_.end()) {
+            it = okx_ob_codecs_cache_.try_emplace(level, std::make_unique<ZstdCompressor>(level)).first;
+        }
+        return it->second;
+    }
+
+    [[nodiscard]] BinanceObSimdCodec& get_binance_ob_codec(int level) const
+    {
+        std::lock_guard lock(binance_ob_cache_mutex_);
+
+        auto it = binance_ob_codecs_cache_.find(level);
+        if (it == binance_ob_codecs_cache_.end()) {
+            it = binance_ob_codecs_cache_.try_emplace(level, std::make_unique<ZstdCompressor>(level)).first;
         }
         return it->second;
     }
@@ -131,12 +173,11 @@ DataCompressor::ChunkResult DataCompressor::compress_zstd(
         return std::unexpected(CodecError::from_string(compressed_result.error(), ErrorCode::CompressionFailure));
     }
     
-    auto chunk = std::make_unique<Chunk>();
-    chunk->set_type(ChunkDataType::ZSTD_COMPRESSED);
-    chunk->set_dtype(dtype);
-    chunk->set_shape({shape.begin(), shape.end()});
-    chunk->set_data(std::move(*compressed_result));
-    return chunk;
+    return create_chunk_from_result(std::move(*compressed_result),
+                                    ChunkDataType::ZSTD_COMPRESSED,
+                                    dtype,
+                                    shape,
+                                    ChunkFlags::ZSTD);
 }
 
 // --- Temporal 1D ---
@@ -174,7 +215,7 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
 
     const int64_t shape_val = static_cast<int64_t>(data.size());
     return create_chunk_from_result(std::move(encoded_result),
-        type, DType::FLOAT32, {&shape_val, 1});
+        type, DType::FLOAT32, {&shape_val, 1}, ChunkFlags::NONE);
 }
 
 DataCompressor::ChunkResult DataCompressor::compress_chunk(
@@ -198,7 +239,7 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
 
     const int64_t shape_val = static_cast<int64_t>(data.size());
     return create_chunk_from_result(std::move(encoded_result),
-        type, DType::INT64, {&shape_val, 1});
+        type, DType::INT64, {&shape_val, 1}, ChunkFlags::NONE);
 }
 
 DataCompressor::ChunkResult DataCompressor::compress_chunk(
@@ -213,6 +254,45 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
     }
 
     switch (type) {
+        case ChunkDataType::OKX_OB_SIMD_F16_AS_F32:
+        case ChunkDataType::OKX_OB_SIMD_F32:
+        {
+            if (shape.size() != 3) return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "OKX Orderbook data requires a 3D shape."});
+            if (static_cast<size_t>(shape[1]) != codecs::Orderbook::OKX_DEPTH || static_cast<size_t>(shape[2]) != codecs::Orderbook::OKX_FEATURES) {
+                return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, std::format("OKX orderbook shape mismatch. Expected ({}, {}), got ({}, {}).", codecs::Orderbook::OKX_DEPTH, codecs::Orderbook::OKX_FEATURES, shape[1], shape[2])});
+            }
+            auto& codec = pimpl_->get_okx_ob_codec(level);
+            
+            std::lock_guard lock(pimpl_->ob_workspace_mutex_); // Using generic OB workspace mutex for now
+            std::remove_reference_t<decltype(codec)>::Snapshot snapshot;
+            std::ranges::copy(prev_state, snapshot.begin());
+            if (type == ChunkDataType::OKX_OB_SIMD_F16_AS_F32) {
+
+                encoded_result = codec.encode16(data, snapshot, pimpl_->ob_workspace_);
+            } else {
+                encoded_result = codec.encode32(data, snapshot, pimpl_->ob_workspace_);
+            }
+            break;
+        }
+        case ChunkDataType::BINANCE_OB_SIMD_F16_AS_F32:
+        case ChunkDataType::BINANCE_OB_SIMD_F32:
+        {
+            if (shape.size() != 3) return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, "Binance Orderbook data requires a 3D shape."});
+            if (static_cast<size_t>(shape[1]) != codecs::Orderbook::BINANCE_DEPTH || static_cast<size_t>(shape[2]) != codecs::Orderbook::BINANCE_FEATURES) {
+                return std::unexpected(CodecError{ErrorCode::InvalidChunkShape, std::format("Binance orderbook shape mismatch. Expected ({}, {}), got ({}, {}).", codecs::Orderbook::BINANCE_DEPTH, codecs::Orderbook::BINANCE_FEATURES, shape[1], shape[2])});
+            }
+            auto& codec = pimpl_->get_binance_ob_codec(level);
+            
+            std::lock_guard lock(pimpl_->ob_workspace_mutex_); // Using generic OB workspace mutex for now
+            std::remove_reference_t<decltype(codec)>::Snapshot snapshot;
+            std::ranges::copy(prev_state, snapshot.begin());
+            if (type == ChunkDataType::BINANCE_OB_SIMD_F16_AS_F32) {
+                encoded_result = codec.encode16(data, snapshot, pimpl_->ob_workspace_);
+            } else {
+                encoded_result = codec.encode32(data, snapshot, pimpl_->ob_workspace_);
+            }
+            break;
+        }
         case ChunkDataType::GENERIC_OB_SIMD_F16_AS_F32:
         case ChunkDataType::GENERIC_OB_SIMD_F32:
         {
@@ -248,7 +328,7 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
             return std::unexpected(CodecError{ErrorCode::InvalidDataType, "Unsupported or mismatched chunk type for 2D/3D float data."});
     }
 
-    return create_chunk_from_result(std::move(encoded_result), type, DType::FLOAT32, shape);
+    return create_chunk_from_result(std::move(encoded_result), type, DType::FLOAT32, shape, ChunkFlags::NONE);
 }
 
 DataCompressor::ChunkResult DataCompressor::compress_chunk(
@@ -278,7 +358,7 @@ DataCompressor::ChunkResult DataCompressor::compress_chunk(
             return std::unexpected(CodecError{ErrorCode::InvalidDataType, "Unsupported or mismatched chunk type for 2D int64 data."});
     }
 
-    return create_chunk_from_result(std::move(encoded_result), type, DType::INT64, shape);
+    return create_chunk_from_result(std::move(encoded_result), type, DType::INT64, shape, ChunkFlags::NONE);
 }
 
 } // namespace cryptodd

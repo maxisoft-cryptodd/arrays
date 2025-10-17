@@ -408,8 +408,8 @@ std::expected<Float32AlignedVector, std::string> OrderbookSimdCodec<Depth, Featu
     return final_output;
 }
 
-using OkxObSimdCodec = OrderbookSimdCodec<codecs::Orderbook::OKX_DEPTH, codecs::Orderbook::OKX_FEATURES>;
-using BitfinexObSimdCodec = OrderbookSimdCodec<codecs::Orderbook::OKX_DEPTH, codecs::Orderbook::OKX_FEATURES>; // Assuming same as OKX
-using BinanceObSimdCodec = OrderbookSimdCodec<codecs::Orderbook::BINANCE_DEPTH, codecs::Orderbook::BINANCE_FEATURES>;
+    using OkxObSimdCodec = OrderbookSimdCodec<codecs::Orderbook::OKX_DEPTH, codecs::Orderbook::OKX_FEATURES>;
+    using BitfinexObSimdCodec = OrderbookSimdCodec<codecs::Orderbook::OKX_DEPTH, codecs::Orderbook::OKX_FEATURES>; // Assuming same as OKX
+    using BinanceObSimdCodec = OrderbookSimdCodec<codecs::Orderbook::BINANCE_DEPTH, codecs::Orderbook::BINANCE_FEATURES>;
 
 } // namespace cryptodd
