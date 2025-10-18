@@ -130,44 +130,6 @@ std::expected<Chunk, std::string> DataReader::get_chunk(const size_t index) {
         return std::unexpected(std::format("Chunk {} shape has an excessive number of dimensions (> {}). File may be corrupt.", index, MAX_SHAPE_DIMENSIONS));
     }
 
-    // Decompress data if necessary
-    if (chunk.type() == ChunkDataType::ZSTD_COMPRESSED) {
-        auto& compressor = get_zstd_compressor();
-        auto decompressed_result = compressor.decompress(chunk.data());
-
-        if (!decompressed_result) {
-            return std::unexpected(std::format("Failed to decompress chunk {}: {}", index, decompressed_result.error()));
-        }
-
-        // --- REGRESSION FIX: Validate decompressed size ---
-        size_t num_elements = 1;
-        for (const int64_t dim : chunk.get_shape()) {
-            if (dim < 0) {
-                return std::unexpected(std::format(
-                    "Chunk {} has a negative shape dimension ({}). File may be corrupt.", index, dim));
-            }
-            num_elements *= static_cast<size_t>(dim);
-        }
-        const size_t element_size = get_dtype_size(chunk.dtype());
-        if (element_size == 0) {
-            return std::unexpected(std::format("Unsupported DType ({}) for chunk {}.", static_cast<int>(chunk.dtype()), index));
-        }
-        const size_t expected_raw_size = num_elements * element_size;
-
-        if (decompressed_result->size() != expected_raw_size) {
-            return std::unexpected(std::format("Decompressed size mismatch for chunk {}. Expected {}, got {}.", index, expected_raw_size, decompressed_result->size()));
-        }
-
-        chunk.set_data(std::move(*decompressed_result));
-        chunk.set_type(ChunkDataType::RAW);
-    }
-    // TODO: Implement other decompression/transformation types
-
-    const blake3_hash128_t actual_hash = calculate_blake3_hash128(std::span<const std::byte>(chunk.data()));
-    if (actual_hash != chunk.hash()) {
-        return std::unexpected(std::format("Chunk data integrity check failed for chunk index {}.", index));
-    }
-
     return chunk;
 }
 

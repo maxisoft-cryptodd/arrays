@@ -5,6 +5,7 @@
 #include "../storage/i_storage_backend.h"
 #include "../storage/memory_backend.h"
 #include "../file_format/blake3_stream_hasher.h"
+#include "../codecs/zstd_compressor.h"
 
 #include <format>
 #include <memory> // For std::make_unique
@@ -334,10 +335,35 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
 }
 
 std::expected<void, std::string> DataWriter::set_user_metadata(std::span<const std::byte> user_metadata) {
-    file_header_.set_user_metadata({user_metadata.begin(), user_metadata.end()});
-    // Re-write the header at the beginning of the file.
-    if (auto res = backend_->seek(0); !res) return std::unexpected(res.error());
-    return file_header_.write(*backend_);
+    // CRITICAL FIX: Enforce the safety rule within the DataWriter itself.
+    // This prevents file corruption by disallowing metadata changes after chunks have been written.
+    if (num_chunks() > 0) {
+        return std::unexpected("User metadata can only be set on a new, empty file before any chunks are written.");
+    }
+    
+    // --- New, Simplified Logic ---
+    // Instead of complex in-place modification, we re-initialize the entire file.
+    // This is safe because we've already asserted num_chunks() == 0.
+    
+    // 1. Rewind the backend to the beginning to ensure a clean slate for overwriting.
+    if (auto res = backend_->rewind(); !res) return res;
+
+    // 2. Compress the new metadata.
+    auto& compressor = get_zstd_compressor();
+    auto compressed_meta_res = compressor.compress(user_metadata);
+    if (!compressed_meta_res) {
+        return std::unexpected("Failed to compress user metadata: " + compressed_meta_res.error());
+    }
+    file_header_.set_user_metadata(std::move(*compressed_meta_res));
+
+    // 3. Write the new header from the beginning of the file.
+    if (auto res = file_header_.write(*backend_); !res) return res;
+
+    // 4. The original first index block has been overwritten.
+    // We must re-initialize the index tracking state and write a fresh empty index block
+    // at the correct new position right after the new header.
+    chunk_offset_blocks_.clear();
+    return write_new_chunk_offsets_block(0);
 }
 
 std::expected<void, std::string> DataWriter::flush() {

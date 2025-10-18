@@ -101,4 +101,11 @@ namespace cryptodd
         return details::calculate_blake3_hash128(d);
     }
 
+    template <typename T>
+    blake3_hash128_t calculate_blake3_hash128(std::span<T> d)
+    {
+        std::span<const T> span = d;
+        return details::calculate_blake3_hash128(span);
+    }
+
 } // namespace cryptodd

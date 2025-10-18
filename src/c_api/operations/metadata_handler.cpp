@@ -6,6 +6,7 @@
 #include "../../data_io/data_reader.h" // For DataReader
 #include "../../data_io/data_writer.h" // For DataWriter
 #include "../../file_format/cdd_file_format.h" // For FileHeader
+#include "../../codecs/zstd_compressor.h" // For decompression
 
 namespace cryptodd::ffi {
 
@@ -32,8 +33,20 @@ std::expected<GetUserMetadataResponse, ExpectedError> GetUserMetadataHandler::ex
     
     GetUserMetadataResponse response;
     response.client_key = request.client_key;
-    response.user_metadata_base64 = base64::encode(header.user_metadata());
-    // Metadata will be injected at the C API layer
+
+    const auto& compressed_meta = header.user_metadata();
+    if (compressed_meta.empty()) {
+        response.user_metadata_base64 = "";
+    } else {
+        // FIX: Decompress metadata before encoding it to base64
+        ZstdCompressor compressor;
+        auto decompressed_res = compressor.decompress(compressed_meta);
+        if (!decompressed_res) {
+            return std::unexpected(ExpectedError("Failed to decompress user metadata: " + decompressed_res.error()));
+        }
+        response.user_metadata_base64 = base64::encode(*decompressed_res);
+    }
+
     return response;
 }
 
@@ -57,23 +70,29 @@ std::expected<SetUserMetadataResponse, ExpectedError> SetUserMetadataHandler::ex
     auto writer_opt = context.get_writer();
     if (!writer_opt) return std::unexpected(ExpectedError("Context is not in a writable mode."));
 
+    DataWriter& writer = writer_opt.value().get();
+
+    // FIX: Add safety check to prevent file corruption.
+    if (writer.num_chunks() > 0) {
+        return std::unexpected(ExpectedError("User metadata can only be set on a new, empty file before any chunks are written."));
+    }
+
     memory::vector<std::byte> metadata_bytes_result;
     try
     {
         metadata_bytes_result = base64::decode(request.user_metadata_base64);
     }
-    catch (std::exception& e)
+    catch (const std::exception& e)
     {
-        return std::unexpected(ExpectedError("Failed to decode base64 metadata."));
+        return std::unexpected(ExpectedError(std::string("Failed to decode base64 metadata: ") + e.what()));
     }
 
-    auto result = writer_opt.value().get().set_user_metadata(metadata_bytes_result);
+    auto result = writer.set_user_metadata(metadata_bytes_result);
     if (!result) return std::unexpected(ExpectedError(result.error()));
     
     SetUserMetadataResponse response;
     response.client_key = request.client_key;
     response.status = "Metadata updated.";
-    // Metadata will be injected at the C API layer
     return response;
 }
 
