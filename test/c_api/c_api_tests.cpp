@@ -8,6 +8,7 @@
 #include "../test_helpers.h"
 #include "base64.h" // For verifying metadata
 #include "cryptodd/c_api.h"
+#include "data_reader.h"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -373,13 +374,148 @@ TEST_F(CApiTest, AdvancedErrorHandling) {
         handles_to_cleanup_.pop_back(); // Destroys the writer, flushing and closing the file.
     }
 
-    json file_read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", test_filepath_.string()}}}};
-    cdd_handle_t reader_handle = create_context(file_read_config);
-    // This handle is now valid because the file is well-formed.
-    ASSERT_GT(reader_handle, 0);
+    {
+        json file_read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", test_filepath_.string()}}}};
+        cdd_handle_t reader_handle = create_context(file_read_config);
+        // This handle is now valid because the file is well-formed.
+        ASSERT_GT(reader_handle, 0);
 
-    result_code = cdd_execute_op(reader_handle, mismatch_req.dump().c_str(), mismatch_req.dump().length(), generate_random_data(100).data(), 100, nullptr, 0, response_buffer_.data(), response_buffer_.size());
-    ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED); // This should now pass.
-    error_response = json::parse(response_buffer_.data());
-    ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("not in a writable mode") != std::string::npos);
+        result_code = cdd_execute_op(reader_handle, mismatch_req.dump().c_str(), mismatch_req.dump().length(), generate_random_data(100).data(), 100, nullptr, 0, response_buffer_.data(), response_buffer_.size());
+        ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED);
+        error_response = json::parse(response_buffer_.data());
+        ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("not in a writable mode") != std::string::npos);
+
+        handles_to_cleanup_.pop_back(); // Close the reader
+    }
+}
+
+// --- Test Group 5: Feature-Specific Tests ---
+
+TEST_F(CApiTest, ZstdCompressionLevels) {
+    json mem_config = {{"backend", {{"type", "Memory"}, {"mode", "WriteTruncate"}}}};
+    cdd_handle_t handle = create_context(mem_config);
+    ASSERT_GT(handle, 0);
+
+    // 1. Happy Path: Use a valid, non-default compression level
+    auto data = generate_random_data(100);
+    json store_req = {
+        {"op_type", "StoreChunk"},
+        {"data_spec", {{"dtype", "UINT8"}, {"shape", {100}}}},
+        {"encoding", {{"codec", "ZSTD_COMPRESSED"}, {"zstd_level", 5}}}
+    };
+    auto store_res = execute_op(handle, store_req, data);
+    ASSERT_FALSE(store_res.is_null());
+    ASSERT_EQ(store_res["zstd_level"], 5);
+
+    // 2. Error Path: Use an invalid compression level
+    json bad_level_req = {
+        {"op_type", "StoreChunk"},
+        {"data_spec", {{"dtype", "UINT8"}, {"shape", {100}}}},
+        {"encoding", {{"codec", "ZSTD_COMPRESSED"}, {"zstd_level", 99}}}
+    };
+    int64_t result_code = cdd_execute_op(handle, bad_level_req.dump().c_str(), bad_level_req.dump().length(), data.data(), data.size(), nullptr, 0, response_buffer_.data(), response_buffer_.size());
+    ASSERT_LT(result_code, 0);
+    json error_response = json::parse(response_buffer_.data());
+    ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("Invalid zstd compression level") != std::string::npos);
+}
+
+
+TEST_F(CApiTest, LoadChunksChecksumVerification) {
+    test_filepath_ = generate_unique_test_filepath();
+    auto original_data = generate_random_data(100);
+
+    // 1. Write a file with one raw chunk
+    {
+        json write_config = {{"backend", {{"type", "File"}, {"mode", "WriteTruncate"}, {"path", test_filepath_.string()}}}};
+        cdd_handle_t writer_handle = create_context(write_config);
+        execute_op(writer_handle, {{"op_type", "StoreChunk"}, {"data_spec", {{"dtype", "UINT8"}, {"shape", {100}}}}, {"encoding", {{"codec", "RAW"}}}}, original_data);
+        handles_to_cleanup_.pop_back(); // Close writer
+    }
+
+    // 2. Manually corrupt the file on disk
+    {
+        // Open the file just to find the chunk offset
+        auto reader_res = cryptodd::DataReader::open(test_filepath_);
+        ASSERT_TRUE(reader_res.has_value()) << reader_res.error();
+        auto chunk_res = reader_res.value()->get_chunk(0);
+        ASSERT_TRUE(chunk_res.has_value()) << chunk_res.error();
+
+        // Calculate the offset to the data payload within the file
+        size_t header_size =
+            sizeof(uint32_t) + // chunk size
+            sizeof(uint16_t) + // type
+            sizeof(uint16_t) + // dtype
+            sizeof(cryptodd::blake3_hash128_t) + // hash
+            sizeof(uint64_t) + // flags
+            sizeof(uint32_t) + (chunk_res->shape().size() * sizeof(int64_t)) + // shape
+            sizeof(uint32_t);  // data size
+
+        // We need the offset of the chunk itself, which is after the file header and index block
+        uint64_t chunk_offset = reader_res.value()->get_index_block_offset() + reader_res.value()->get_index_block_size();
+        uint64_t corruption_offset = chunk_offset + header_size + 10; // Corrupt the 11th byte
+
+        // Re-open in binary read/write and corrupt one byte
+        std::fstream file(test_filepath_, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(file.is_open());
+        file.seekp(corruption_offset);
+        char byte_to_flip;
+        file.read(&byte_to_flip, 1);
+        file.seekp(corruption_offset);
+        byte_to_flip = ~byte_to_flip;
+        file.write(&byte_to_flip, 1);
+        file.close();
+    }
+
+    // 3. Attempt to load with checksum verification enabled (should fail)
+    {
+        json read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", test_filepath_.string()}}}};
+        cdd_handle_t reader_handle = create_context(read_config);
+        std::vector<std::byte> read_buffer(100);
+        json load_req = {{"op_type", "LoadChunks"}, {"selection", {{"type", "All"}}}, {"check_checksums", true}};
+
+        int64_t result_code = cdd_execute_op(reader_handle, load_req.dump().c_str(), load_req.dump().length(), nullptr, 0, read_buffer.data(), read_buffer.size(), response_buffer_.data(), response_buffer_.size());
+        ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED);
+        json error_response = json::parse(response_buffer_.data());
+        ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("Checksum mismatch") != std::string::npos);
+    }
+
+    // 4. Load again with checksum verification disabled (should succeed)
+    {
+        json read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", test_filepath_.string()}}}};
+        cdd_handle_t reader_handle = create_context(read_config);
+        std::vector<std::byte> read_buffer(100);
+        json load_req = {{"op_type", "LoadChunks"}, {"selection", {{"type", "All"}}}, {"check_checksums", false}};
+        
+        auto load_res = execute_op(reader_handle, load_req, {}, read_buffer);
+        ASSERT_FALSE(load_res.is_null());
+        ASSERT_EQ(load_res["bytes_written_to_output"], 100);
+
+        // Verify we read the *corrupted* data, not the original
+        ASSERT_NE(0, std::memcmp(read_buffer.data(), original_data.data(), 100));
+    }
+}
+
+TEST_F(CApiTest, SetMetadataAfterWriteFails) {
+    test_filepath_ = generate_unique_test_filepath();
+    json write_config = {{"backend", {{"type", "File"}, {"mode", "WriteTruncate"}, {"path", test_filepath_.string()}}}};
+    cdd_handle_t writer_handle = create_context(write_config);
+    ASSERT_GT(writer_handle, 0);
+
+    // 1. Write one chunk to the file.
+    execute_op(writer_handle, {{"op_type", "StoreChunk"}, {"data_spec", {{"dtype", "UINT8"}, {"shape", {10}}}}, {"encoding", {{"codec", "RAW"}}}}, generate_random_data(10));
+
+    // 2. Explicitly flush to ensure the write is committed.
+    execute_op(writer_handle, {{"op_type", "Flush"}});
+
+    // 3. Now, attempt to set metadata, which should fail because the file is no longer empty.
+    json set_meta_req = {
+        {"op_type", "SetUserMetadata"},
+        {"user_metadata_base64", "dGVzdA=="} // "test"
+    };
+    int64_t result_code = cdd_execute_op(writer_handle, set_meta_req.dump().c_str(), set_meta_req.dump().length(), nullptr, 0, nullptr, 0, response_buffer_.data(), response_buffer_.size());
+    
+    // 4. Verify the failure.
+    ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED);
+    json error_response = json::parse(response_buffer_.data());
+    ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("metadata can only be set on a new, empty file") != std::string::npos);
 }
