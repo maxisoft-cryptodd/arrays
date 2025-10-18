@@ -1,8 +1,9 @@
 #pragma once
 
-#include "../cdd_context.h" // For ExpectedError
 #include <nlohmann/json_fwd.hpp>
 #include <expected>
+
+#include "../cdd_context.h"
 
 namespace cryptodd::ffi {
 

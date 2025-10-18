@@ -63,7 +63,7 @@ struct ChunkWriteDetails {
     size_t chunk_index;
     int64_t original_size;
     int64_t compressed_size;
-    double compression_ratio;
+    float compression_ratio;
 };
 
 struct StoreChunkResponse : OperationResponseBase {

@@ -86,11 +86,13 @@ public:
      * @param dtype The underlying data type of the elements in the chunk.
      * @param flags Flags for the chunk.
      * @param shape The shape of the data.
-     * @param data The raw data to be written.
+     * @param source_chunk The chunk containing the data payload to be written. The data will be moved from this chunk.
+     * @param raw_data_hash The BLAKE3 hash of the original, unprocessed data.
      * @return The index of the newly appended chunk on success, or an error string.
      */
     std::expected<size_t, std::string> append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
-                                                  std::span<const int64_t> shape, std::span<const std::byte> data);
+                                                  std::span<const int64_t> shape, Chunk& source_chunk,
+                                                  blake3_hash128_t raw_data_hash);
 
     /**
      * @brief Updates the user metadata in the file header.

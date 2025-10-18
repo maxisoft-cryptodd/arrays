@@ -1,12 +1,13 @@
-#include "cdd_context.h"
 #include <functional>
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <nlohmann/json.hpp>
+
+#include "cdd_context.h"
 #include "../data_io/data_reader.h"
 #include "../data_io/data_writer.h"
 #include "../storage/file_backend.h"
-#include "../storage/memory_backend.h"
 #include "operations/flush_handler.h"
 #include "operations/inspect_handler.h"
 #include "operations/load_chunks_handler.h"
@@ -14,7 +15,7 @@
 #include "operations/operation_handler.h"
 #include "operations/store_array_handler.h"
 #include "operations/store_chunk_handler.h"
-#include "operations/ping_handler.h" // Include PingHandler
+#include "operations/ping_handler.h"
 
 namespace cryptodd::ffi {
 
@@ -53,7 +54,7 @@ std::expected<std::unique_ptr<CddContext>, ExpectedError> CddContext::create(con
             reader = std::move(*reader_result);
         } else { // WriteAppend or WriteTruncate
             size_t capacity = 1024;
-            std::vector<std::byte> user_metadata; // Base64 parsing to be added later
+            memory::vector<std::byte> user_metadata; // Base64 parsing to be added later
              if (config.contains("writer_options")) {
                 const auto& writer_opts = config.at("writer_options");
                 capacity = writer_opts.value("chunk_offsets_block_capacity", 1024);
@@ -113,6 +114,12 @@ std::expected<nlohmann::json, ExpectedError> CddContext::execute_operation(
     std::span<const std::byte> input_data,
     std::span<std::byte> output_data)
 {
+    // NEW: Create the guard at the top of the function.
+    ConcurrencyGuard guard(in_use_);
+    if (!guard) {
+        return std::unexpected(ExpectedError("Concurrent operation detected on the same context handle. Contexts are not thread-safe."));
+    }
+
     // Using a static dispatch map is more efficient and scalable than an if-else chain.
     using HandlerFactory = std::function<std::unique_ptr<IOperationHandler>()>;
     static const std::unordered_map<std::string, HandlerFactory> op_handlers = {
@@ -134,7 +141,6 @@ std::expected<nlohmann::json, ExpectedError> CddContext::execute_operation(
             return std::unexpected(ExpectedError("Unknown or unsupported op_type: " + op_type));
         }
 
-        // Create and execute the handler from the map.
         auto handler = it->second();
         return handler->execute(*this, op_request, input_data, output_data);
 
