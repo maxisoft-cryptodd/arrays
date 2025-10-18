@@ -2,12 +2,13 @@
 #include <magic_enum/magic_enum.hpp>
 #include <nlohmann/json.hpp>
 
-#include "../operations/inspect_handler.h"
-#include "../cdd_context.h"
-#include "../operations/json_serialization.h"
-#include "../base64.h" // For base64::encode
+#include "../../codecs/zstd_compressor.h" // For decompression
 #include "../../data_io/data_reader.h" // For DataReader
 #include "../../file_format/cdd_file_format.h" // For FileHeader
+#include "../cdd_context.h"
+#include "../operations/inspect_handler.h"
+#include "base64.h" // For base64::encode
+#include "json_serialization.h"
 
 namespace cryptodd::ffi {
 
@@ -39,12 +40,23 @@ std::expected<InspectResponse, ExpectedError> InspectHandler::execute_typed(
 
     // Populate FileHeaderInfo
     const auto& header = reader.get_file_header();
-    response.file_header = FileHeaderInfo {
-        .version = header.version(),
-        // FIX: Call the new methods on the DataReader instance, not the header.
-        .index_block_offset = reader.get_index_block_offset(),
+
+    // FIX: Decompress user metadata before encoding to base64
+    std::string user_meta_b64;
+    const auto& compressed_meta = header.user_metadata();
+    if (!compressed_meta.empty()) {
+        ZstdCompressor compressor;
+        auto decompressed_res = compressor.decompress(compressed_meta);
+        if (!decompressed_res) {
+            return std::unexpected(ExpectedError("Failed to decompress user metadata for Inspect operation: " + decompressed_res.error()));
+        }
+        user_meta_b64 = base64::encode(*decompressed_res);
+    }
+
+    response.file_header = {
+        .version = header.version(), .index_block_offset = reader.get_index_block_offset(),
         .index_block_size = reader.get_index_block_size(),
-        .user_metadata_base64 = base64::encode(header.user_metadata())
+        .user_metadata_base64 = std::move(user_meta_b64)
     };
 
     response.total_chunks = reader.num_chunks();
@@ -52,6 +64,8 @@ std::expected<InspectResponse, ExpectedError> InspectHandler::execute_typed(
 
     for (size_t i = 0; i < reader.num_chunks(); ++i) {
         auto chunk_result = reader.get_chunk(i);
+        // NOTE: get_chunk already handles decompression for the chunk *body*,
+        // which is why this loop is correct. We only needed to fix the header metadata.
         if (!chunk_result) return std::unexpected(ExpectedError(chunk_result.error()));
         
         response.chunk_summaries.push_back(ChunkSummary {
@@ -63,7 +77,6 @@ std::expected<InspectResponse, ExpectedError> InspectHandler::execute_typed(
             .decoded_size_bytes = chunk_result->expected_size()
         });
     }
-    // Metadata will be injected at the C API layer
     return response;
 }
 

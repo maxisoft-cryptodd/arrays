@@ -67,7 +67,6 @@ void from_json(const nlohmann::json& j, EncodingSpec& spec) { enum_from_json(get
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ByCountChunking, rows_per_chunk)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(OperationMetadata, backend_type, mode, duration_us)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChunkWriteDetails, chunk_index, original_size, compressed_size, compression_ratio)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChunkSummary, index, shape, dtype, codec, encoded_size_bytes, decoded_size_bytes)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FileHeaderInfo, version, index_block_offset, index_block_size, user_metadata_base64)
 
 // --- StoreChunk ---
@@ -75,6 +74,26 @@ void from_json(const nlohmann::json& j, StoreChunkRequest& req) { from_json_base
 void to_json(nlohmann::json& j, const StoreChunkResponse& res) { to_json_base(j, res); j["details"] = res.details; j["shape"] = res.shape; j["zstd_level"] = res.zstd_level; j["metadata"] = res.metadata; }
 
 // --- StoreArray ---
+
+// FIX: Add explicit serialization for ChunkSummary to handle enums correctly
+void to_json(nlohmann::json& j, const ChunkSummary& summary) {
+    j = nlohmann::json{
+        {"index", summary.index},
+        {"shape", summary.shape},
+        {"encoded_size_bytes", summary.encoded_size_bytes},
+        {"decoded_size_bytes", summary.decoded_size_bytes}
+    };
+    enum_to_json(j["dtype"], summary.dtype);
+    enum_to_json(j["codec"], summary.codec);
+}
+void from_json(const nlohmann::json& j, ChunkSummary& summary) {
+    summary.index = get_required<size_t>(j, "index");
+    summary.shape = get_required<std::vector<int64_t>>(j, "shape");
+    summary.encoded_size_bytes = get_required<size_t>(j, "encoded_size_bytes");
+    summary.decoded_size_bytes = get_required<size_t>(j, "decoded_size_bytes");
+    enum_from_json(get_required<nlohmann::json>(j, "dtype"), summary.dtype);
+    enum_from_json(get_required<nlohmann::json>(j, "codec"), summary.codec);
+}
 void from_json(const nlohmann::json& j, ChunkingStrategy& s); // Implemented below
 void to_json(nlohmann::json& j, const ChunkingStrategy& s);   // Implemented below
 void from_json(const nlohmann::json& j, StoreArrayRequest& req) { from_json_base(j, req); req.data_spec = get_required<DataSpec>(j, "data_spec"); req.encoding = get_required<EncodingSpec>(j, "encoding"); req.chunking_strategy = get_required<ChunkingStrategy>(j, "chunking_strategy"); }
@@ -83,7 +102,7 @@ void to_json(nlohmann::json& j, const StoreArrayResponse& res) { to_json_base(j,
 // --- LoadChunks ---
 void from_json(const nlohmann::json& j, ChunkSelection& s); // Implemented below
 void to_json(nlohmann::json& j, const ChunkSelection& s);   // Implemented below
-void from_json(const nlohmann::json& j, LoadChunksRequest& req) { from_json_base(j, req); req.selection = get_required<ChunkSelection>(j, "selection"); }
+void from_json(const nlohmann::json& j, LoadChunksRequest& req) { from_json_base(j, req); req.selection = get_required<ChunkSelection>(j, "selection"); req.check_checksums = j.value("check_checksums", req.check_checksums); }
 void to_json(nlohmann::json& j, const LoadChunksResponse& res) { to_json_base(j, res); j["bytes_written_to_output"] = res.bytes_written_to_output; if (res.final_shape) j["final_shape"] = *res.final_shape; j["metadata"] = res.metadata; }
 
 // --- Inspect ---

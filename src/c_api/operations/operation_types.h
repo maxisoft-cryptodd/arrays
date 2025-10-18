@@ -96,6 +96,7 @@ using ChunkSelection = std::variant<AllSelection, IndicesSelection, RangeSelecti
 
 struct LoadChunksRequest : OperationRequestBase {
     ChunkSelection selection;
+    bool check_checksums = true;
 };
 
 struct LoadChunksResponse : OperationResponseBase {

@@ -23,6 +23,8 @@ protected:
     }
 
     void TearDown() override {
+        handles_to_cleanup_.clear();
+
         if (!test_filepath_.empty() && fs::exists(test_filepath_)) {
             try {
                 fs::remove(test_filepath_);
@@ -143,9 +145,8 @@ TEST_F(CApiTest, PingAndClientKey) {
 }
 
 TEST_F(CApiTest, MetadataOperations) {
-    json mem_config = {{"backend", {{"type", "Memory"}, {"mode", "WriteTruncate"}}}};
-    cdd_handle_t handle = create_context(mem_config);
-    ASSERT_GT(handle, 0);
+    // FIX: Use a file backend to persist data between write and read operations.
+    test_filepath_ = generate_unique_test_filepath();
 
     const std::string user_meta_str = "This is my custom metadata!";
     const auto user_meta_bytes = cryptodd::memory::vector<std::byte>(
@@ -154,20 +155,35 @@ TEST_F(CApiTest, MetadataOperations) {
     );
     const std::string user_meta_b64 = cryptodd::ffi::base64::encode(user_meta_bytes);
 
-    // 1. Set the metadata
-    json set_meta_req = {
-        {"op_type", "SetUserMetadata"},
-        {"user_metadata_base64", user_meta_b64}
-    };
-    auto set_meta_res = execute_op(handle, set_meta_req);
-    ASSERT_FALSE(set_meta_res.is_null());
-    ASSERT_EQ(set_meta_res["status"], "Metadata updated.");
+    // Phase 1: Write the metadata
+    {
+        json file_write_config = {{"backend", {{"type", "File"}, {"mode", "WriteTruncate"}, {"path", test_filepath_.string()}}}};
+        cdd_handle_t writer_handle = create_context(file_write_config);
+        ASSERT_GT(writer_handle, 0);
 
-    // 2. Get the metadata back
-    json get_meta_req = {{"op_type", "GetUserMetadata"}};
-    auto get_meta_res = execute_op(handle, get_meta_req);
-    ASSERT_FALSE(get_meta_res.is_null());
-    ASSERT_EQ(get_meta_res["user_metadata_base64"], user_meta_b64);
+        json set_meta_req = {
+            {"op_type", "SetUserMetadata"},
+            {"user_metadata_base64", user_meta_b64}
+        };
+        auto set_meta_res = execute_op(writer_handle, set_meta_req);
+        ASSERT_FALSE(set_meta_res.is_null());
+        ASSERT_EQ(set_meta_res["status"], "Metadata updated.");
+
+        // Destroy the writer handle to ensure data is flushed and the file is closed.
+        handles_to_cleanup_.pop_back();
+    }
+
+    // Phase 2: Read and verify the metadata
+    {
+        json file_read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", test_filepath_.string()}}}};
+        cdd_handle_t reader_handle = create_context(file_read_config);
+        ASSERT_GT(reader_handle, 0);
+
+        json get_meta_req = {{"op_type", "GetUserMetadata"}};
+        auto get_meta_res = execute_op(reader_handle, get_meta_req);
+        ASSERT_FALSE(get_meta_res.is_null());
+        ASSERT_EQ(get_meta_res["user_metadata_base64"], user_meta_b64);
+    }
 }
 
 // --- Test Group 3: Full Workflow Integration Test ---
@@ -189,7 +205,7 @@ TEST_F(CApiTest, FullWorkflowWithFile) {
             reinterpret_cast<const std::byte*>(user_meta_str.data()) + user_meta_str.size()
         );
         const std::string user_meta_b64 = cryptodd::ffi::base64::encode(user_meta_bytes);
-        //execute_op(writer_handle, {{"op_type", "SetUserMetadata"}, {"user_metadata_base64", user_meta_b64}});
+        execute_op(writer_handle, {{"op_type", "SetUserMetadata"}, {"user_metadata_base64", user_meta_b64}});
 
         // 2. Store a single chunk of uint8_t
         auto data1 = generate_random_data(100); // 10x10
@@ -237,7 +253,9 @@ TEST_F(CApiTest, FullWorkflowWithFile) {
         ASSERT_EQ(load_array_res["bytes_written_to_output"], 100 * 20 * sizeof(float));
         ASSERT_EQ(load_array_res["final_shape"], json::array({100, 20}));
         // Verify deterministic data content
-        ASSERT_EQ(0, std::memcmp(read_buffer2.data(), reinterpret_cast<const std::byte*>(std::vector<float>(100*20).data()), 100*20*sizeof(float)));
+        auto data2_vec = std::vector<float>(100*20);
+        std::iota(data2_vec.begin(), data2_vec.end(), 0.0f);
+        ASSERT_EQ(0, std::memcmp(read_buffer2.data(), reinterpret_cast<const std::byte*>(data2_vec.data()), 100*20*sizeof(float)));
 
         // 8. Load ALL chunks (heterogeneous types)
         size_t total_size = 100 + (100 * 20 * sizeof(float)) + (10 * sizeof(int64_t));
@@ -296,46 +314,72 @@ TEST_F(CApiTest, TemporalOrderbookCodec) {
 }
 
 TEST_F(CApiTest, AdvancedErrorHandling) {
+    // This handle is for write-only memory tests (Parts 1, 2, 3)
     json mem_config = {{"backend", {{"type", "Memory"}, {"mode", "WriteTruncate"}}}};
-    cdd_handle_t handle = create_context(mem_config);
-    
+    cdd_handle_t mem_writer_handle = create_context(mem_config);
+
     // 1. Invalid JSON in request string
     std::string bad_req_str = R"({"op_type": "StoreChunk", "data_spec": })"; // Truncated
-    int64_t result_code = cdd_execute_op(handle, bad_req_str.c_str(), bad_req_str.length(), nullptr, 0, nullptr, 0, response_buffer_.data(), response_buffer_.size());
+    int64_t result_code = cdd_execute_op(mem_writer_handle, bad_req_str.c_str(), bad_req_str.length(), nullptr, 0, nullptr, 0, response_buffer_.data(), response_buffer_.size());
     ASSERT_EQ(result_code, CDD_ERROR_INVALID_JSON);
 
     // 2. Request missing a required key
     json missing_key_req = {{"op_type", "StoreChunk"}, {"encoding", {{"codec", "RAW"}}}}; // Missing data_spec
-    result_code = cdd_execute_op(handle, missing_key_req.dump().c_str(), missing_key_req.dump().length(), nullptr, 0, nullptr, 0, response_buffer_.data(), response_buffer_.size());
+    result_code = cdd_execute_op(mem_writer_handle, missing_key_req.dump().c_str(), missing_key_req.dump().length(), nullptr, 0, nullptr, 0, response_buffer_.data(), response_buffer_.size());
     ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED);
     json error_response = json::parse(response_buffer_.data());
     ASSERT_EQ(error_response["status"], "Error");
     ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("missing required key: 'data_spec'") != std::string::npos);
-    
+
     // 3. StoreChunk with mismatched data size
     auto data = generate_random_data(50);
     json mismatch_req = {{"op_type", "StoreChunk"}, {"data_spec", {{"dtype", "UINT8"}, {"shape", {100}}}}, {"encoding", {{"codec", "RAW"}}}};
-    result_code = cdd_execute_op(handle, mismatch_req.dump().c_str(), mismatch_req.dump().length(), data.data(), data.size(), nullptr, 0, response_buffer_.data(), response_buffer_.size());
+    result_code = cdd_execute_op(mem_writer_handle, mismatch_req.dump().c_str(), mismatch_req.dump().length(), data.data(), data.size(), nullptr, 0, response_buffer_.data(), response_buffer_.size());
     ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED);
     error_response = json::parse(response_buffer_.data());
     ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("does not match shape") != std::string::npos);
 
     // 4. LoadChunks with output buffer too small
-    execute_op(handle, {{"op_type", "StoreChunk"}, {"data_spec", {{"dtype", "UINT8"}, {"shape", {100}}}}, {"encoding", {{"codec", "RAW"}}}}, generate_random_data(100));
-    std::vector<std::byte> small_buffer(50);
-    result_code = cdd_execute_op(handle, R"({"op_type":"LoadChunks","selection":{"type":"All"}})", strlen(R"({"op_type":"LoadChunks","selection":{"type":"All"}})"), nullptr, 0, small_buffer.data(), small_buffer.size(), response_buffer_.data(), response_buffer_.size());
-    ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED);
-    error_response = json::parse(response_buffer_.data());
-    ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("Output buffer is too small") != std::string::npos);
+    {
+        fs::path file_for_test = generate_unique_test_filepath();
+        // Write Phase
+        {
+            json write_config = {{"backend", {{"type", "File"}, {"mode", "WriteTruncate"}, {"path", file_for_test.string()}}}};
+            cdd_handle_t writer_handle = create_context(write_config);
+            execute_op(writer_handle, {{"op_type", "StoreChunk"}, {"data_spec", {{"dtype", "UINT8"}, {"shape", {100}}}}, {"encoding", {{"codec", "RAW"}}}}, generate_random_data(100));
+            handles_to_cleanup_.pop_back(); // Close the writer
+        }
+        // Read Phase
+        {
+            json read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", file_for_test.string()}}}};
+            cdd_handle_t reader_handle = create_context(read_config);
+            std::vector<std::byte> small_buffer(50);
+            result_code = cdd_execute_op(reader_handle, R"({"op_type":"LoadChunks","selection":{"type":"All"}})", strlen(R"({"op_type":"LoadChunks","selection":{"type":"All"}})"), nullptr, 0, small_buffer.data(), small_buffer.size(), response_buffer_.data(), response_buffer_.size());
+            ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED);
+            error_response = json::parse(response_buffer_.data());
+            ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("Output buffer is too small") != std::string::npos);
+        }
+        handles_to_cleanup_.pop_back(); // Close the writer
+        fs::remove(file_for_test);
+    }
 
     // 5. Write operation on Read-only context
-    test_filepath_ = generate_unique_test_filepath();
+    test_filepath_ = generate_unique_test_filepath(); // Use class member so TearDown cleans it up
+
+    // FIX: Create a valid, empty CDD file to open, instead of a zero-byte file.
+    {
+        json write_config = {{"backend", {{"type", "File"}, {"mode", "WriteTruncate"}, {"path", test_filepath_.string()}}}};
+        cdd_handle_t temp_writer = create_context(write_config);
+        handles_to_cleanup_.pop_back(); // Destroys the writer, flushing and closing the file.
+    }
+
     json file_read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", test_filepath_.string()}}}};
-    // Need to create the file first for Read to succeed
-    std::ofstream(test_filepath_).close(); 
     cdd_handle_t reader_handle = create_context(file_read_config);
+    // This handle is now valid because the file is well-formed.
+    ASSERT_GT(reader_handle, 0);
+
     result_code = cdd_execute_op(reader_handle, mismatch_req.dump().c_str(), mismatch_req.dump().length(), generate_random_data(100).data(), 100, nullptr, 0, response_buffer_.data(), response_buffer_.size());
-    ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED);
+    ASSERT_EQ(result_code, CDD_ERROR_OPERATION_FAILED); // This should now pass.
     error_response = json::parse(response_buffer_.data());
     ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("not in a writable mode") != std::string::npos);
 }

@@ -119,7 +119,8 @@ TEST_F(CddFileTest, WriteAndReadSingleChunk) {
     auto chunk_result = reader->get_chunk(0);
     ASSERT_TRUE(chunk_result.has_value()) << chunk_result.error();
     auto& read_chunk = *chunk_result;
-    ASSERT_EQ(read_chunk.type(), ChunkDataType::RAW); // Should be RAW after decompression
+    // The reader no longer auto-decompresses, so we expect the original compressed type.
+    ASSERT_EQ(read_chunk.type(), ChunkDataType::ZSTD_COMPRESSED);
     ASSERT_EQ(read_chunk.dtype(), DType::UINT8);
     ASSERT_EQ(read_chunk.flags(), ChunkFlags::ZSTD);
     
@@ -127,7 +128,11 @@ TEST_F(CddFileTest, WriteAndReadSingleChunk) {
     ASSERT_EQ(read_shape_span.size(), shape.size());
     EXPECT_TRUE(std::equal(shape.begin(), shape.end(), read_shape_span.begin()));
 
-    ASSERT_EQ(read_chunk.data(), original_data);
+    // Manually decompress the data for verification.
+    ZstdCompressor decompressor;
+    auto decompressed_res = decompressor.decompress(read_chunk.data());
+    ASSERT_TRUE(decompressed_res.has_value()) << decompressed_res.error();
+    ASSERT_EQ(*decompressed_res, original_data);
 }
 
 TEST_F(CddFileTest, WriterRejectsNegativeShape) {
@@ -183,16 +188,22 @@ TEST_F(CddFileTest, WriteAndReadMultipleChunksSingleBlock) {
     auto reader = std::move(*reader_result);
     ASSERT_EQ(reader->num_chunks(), 2);
 
+    ZstdCompressor decompressor;
+
     auto chunk1_result = reader->get_chunk(0);
     ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
-    ASSERT_EQ(chunk1_result->data(), data1);
+    auto decompressed1_res = decompressor.decompress(chunk1_result->data());
+    ASSERT_TRUE(decompressed1_res.has_value()) << decompressed1_res.error();
+    ASSERT_EQ(*decompressed1_res, data1);
     auto read_shape1_span = chunk1_result->get_shape();
     ASSERT_EQ(read_shape1_span.size(), shape1.size());
     EXPECT_TRUE(std::equal(shape1.begin(), shape1.end(), read_shape1_span.begin()));
 
     auto chunk2_result = reader->get_chunk(1);
     ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
-    ASSERT_EQ(chunk2_result->data(), data2);
+    auto decompressed2_res = decompressor.decompress(chunk2_result->data());
+    ASSERT_TRUE(decompressed2_res.has_value()) << decompressed2_res.error();
+    ASSERT_EQ(*decompressed2_res, data2);
     auto read_shape2_span = chunk2_result->get_shape();
     ASSERT_EQ(read_shape2_span.size(), shape2.size());
     EXPECT_TRUE(std::equal(shape2.begin(), shape2.end(), read_shape2_span.begin()));
@@ -243,26 +254,34 @@ TEST_F(CddFileTest, WriteAndReadMultipleChunksMultipleBlocks) {
     auto reader = std::move(*reader_result);
     ASSERT_EQ(reader->num_chunks(), 3);
 
+    ZstdCompressor decompressor;
+
     auto chunk1_result = reader->get_chunk(0);
     ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
+    auto decompressed1_res = decompressor.decompress(chunk1_result->data());
+    ASSERT_TRUE(decompressed1_res.has_value()) << decompressed1_res.error();
     auto read_shape1_span = chunk1_result->get_shape();
     ASSERT_EQ(read_shape1_span.size(), shape1.size());
     EXPECT_TRUE(std::equal(shape1.begin(), shape1.end(), read_shape1_span.begin()));
-    ASSERT_EQ(chunk1_result->data(), data1);
+    ASSERT_EQ(*decompressed1_res, data1);
 
     auto chunk2_result = reader->get_chunk(1);
     ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
+    auto decompressed2_res = decompressor.decompress(chunk2_result->data());
+    ASSERT_TRUE(decompressed2_res.has_value()) << decompressed2_res.error();
     auto read_shape2_span = chunk2_result->get_shape();
     ASSERT_EQ(read_shape2_span.size(), shape2.size());
     EXPECT_TRUE(std::equal(shape2.begin(), shape2.end(), read_shape2_span.begin()));
-    ASSERT_EQ(chunk2_result->data(), data2);
+    ASSERT_EQ(*decompressed2_res, data2);
 
     auto chunk3_result = reader->get_chunk(2);
     ASSERT_TRUE(chunk3_result.has_value()) << chunk3_result.error();
+    auto decompressed3_res = decompressor.decompress(chunk3_result->data());
+    ASSERT_TRUE(decompressed3_res.has_value()) << decompressed3_res.error();
     auto read_shape3_span = chunk3_result->get_shape();
     ASSERT_EQ(read_shape3_span.size(), shape3.size());
     EXPECT_TRUE(std::equal(shape3.begin(), shape3.end(), read_shape3_span.begin()));
-    ASSERT_EQ(chunk3_result->data(), data3);
+    ASSERT_EQ(*decompressed3_res, data3);
 }
 
 TEST_F(CddFileTest, AppendToExistingFile) {
@@ -311,19 +330,25 @@ TEST_F(CddFileTest, AppendToExistingFile) {
     auto reader = std::move(*reader_result);
     ASSERT_EQ(reader->num_chunks(), 2);
 
+    ZstdCompressor decompressor;
+
     auto chunk1_result = reader->get_chunk(0);
     ASSERT_TRUE(chunk1_result.has_value()) << chunk1_result.error();
+    auto decompressed1_res = decompressor.decompress(chunk1_result->data());
+    ASSERT_TRUE(decompressed1_res.has_value()) << decompressed1_res.error();
     auto read_shape1_span = chunk1_result->get_shape();
     ASSERT_EQ(read_shape1_span.size(), shape1.size());
     EXPECT_TRUE(std::equal(shape1.begin(), shape1.end(), read_shape1_span.begin()));
-    ASSERT_EQ(chunk1_result->data(), data1);
+    ASSERT_EQ(*decompressed1_res, data1);
 
     auto chunk2_result = reader->get_chunk(1);
     ASSERT_TRUE(chunk2_result.has_value()) << chunk2_result.error();
+    auto decompressed2_res = decompressor.decompress(chunk2_result->data());
+    ASSERT_TRUE(decompressed2_res.has_value()) << decompressed2_res.error();
     auto read_shape2_span = chunk2_result->get_shape();
     ASSERT_EQ(read_shape2_span.size(), shape2.size());
     EXPECT_TRUE(std::equal(shape2.begin(), shape2.end(), read_shape2_span.begin()));
-    ASSERT_EQ(chunk2_result->data(), data2);
+    ASSERT_EQ(*decompressed2_res, data2);
 }
 
 TEST_F(CddFileTest, GetChunkSlice) {
@@ -379,29 +404,43 @@ TEST_F(CddFileTest, GetChunkSlice) {
     auto reader = std::move(*reader_result);
     ASSERT_EQ(reader->num_chunks(), 4);
 
+    ZstdCompressor decompressor;
+
     // Get slice [0, 1]
     auto slice1_result = reader->get_chunk_slice(0, 1);
     ASSERT_TRUE(slice1_result.has_value()) << slice1_result.error();
     auto& slice1 = *slice1_result;
     ASSERT_EQ(slice1.size(), 2);
-    ASSERT_EQ(slice1[0], data1);
-    ASSERT_EQ(slice1[1], data2);
+    auto decompressed1 = decompressor.decompress(slice1[0]);
+    ASSERT_TRUE(decompressed1.has_value()) << decompressed1.error();
+    ASSERT_EQ(*decompressed1, data1);
+    auto decompressed2 = decompressor.decompress(slice1[1]);
+    ASSERT_TRUE(decompressed2.has_value()) << decompressed2.error();
+    ASSERT_EQ(*decompressed2, data2);
 
     // Get slice [1, 3]
     auto slice2_result = reader->get_chunk_slice(1, 3);
     ASSERT_TRUE(slice2_result.has_value()) << slice2_result.error();
     auto& slice2 = *slice2_result;
     ASSERT_EQ(slice2.size(), 3);
-    ASSERT_EQ(slice2[0], data2);
-    ASSERT_EQ(slice2[1], data3);
-    ASSERT_EQ(slice2[2], data4);
+    auto decompressed2b = decompressor.decompress(slice2[0]);
+    ASSERT_TRUE(decompressed2b.has_value()) << decompressed2b.error();
+    ASSERT_EQ(*decompressed2b, data2);
+    auto decompressed3 = decompressor.decompress(slice2[1]);
+    ASSERT_TRUE(decompressed3.has_value()) << decompressed3.error();
+    ASSERT_EQ(*decompressed3, data3);
+    auto decompressed4 = decompressor.decompress(slice2[2]);
+    ASSERT_TRUE(decompressed4.has_value()) << decompressed4.error();
+    ASSERT_EQ(*decompressed4, data4);
 
     // Get slice [2, 2]
     auto slice3_result = reader->get_chunk_slice(2, 2);
     ASSERT_TRUE(slice3_result.has_value()) << slice3_result.error();
     auto& slice3 = *slice3_result;
     ASSERT_EQ(slice3.size(), 1);
-    ASSERT_EQ(slice3[0], data3);
+    auto decompressed3b = decompressor.decompress(slice3[0]);
+    ASSERT_TRUE(decompressed3b.has_value()) << decompressed3b.error();
+    ASSERT_EQ(*decompressed3b, data3);
 }
 
 TEST_F(CddFileTest, MemoryBackendTest) {
