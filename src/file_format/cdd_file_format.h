@@ -194,6 +194,8 @@ public:
     [[nodiscard]] const memory::vector<std::byte>& data() const { return data_; }
     /** @brief Gets a mutable reference to the chunk's data vector. */
     [[nodiscard]] memory::vector<std::byte>& data() { return data_; }
+    /** @brief Gets an rvalue reference to the chunk's data vector, allowing it to be moved. */
+    [[nodiscard]] memory::vector<std::byte>&& movable_data() { return std::move(data_); }
 
     // Setters
     void set_size(uint32_t size) { size_ = size; }

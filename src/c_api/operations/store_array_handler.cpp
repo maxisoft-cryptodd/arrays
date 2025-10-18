@@ -63,7 +63,7 @@ std::expected<StoreArrayResponse, ExpectedError> StoreArrayHandler::execute_type
     for (int64_t start_row = 0; start_row < total_rows; start_row += rows_per_chunk) {
         const int64_t current_rows = std::min(rows_per_chunk, total_rows - start_row);
         
-        DataSpec chunk_spec = full_data_spec;
+        DataSpec chunk_spec = std::cref(full_data_spec);
         chunk_spec.shape[0] = current_rows;
 
         const size_t offset_bytes = start_row * row_size_bytes;

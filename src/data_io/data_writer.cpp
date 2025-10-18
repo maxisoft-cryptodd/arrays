@@ -2,7 +2,9 @@
 
 #include "../file_format/serialization_helpers.h"
 #include "../storage/file_backend.h"
+#include "../storage/i_storage_backend.h"
 #include "../storage/memory_backend.h"
+#include "../file_format/blake3_stream_hasher.h"
 
 #include <format>
 #include <memory> // For std::make_unique
@@ -206,9 +208,37 @@ DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend) : bac
     }
 }
 
+namespace {
+    // RAII guard to temporarily take ownership of a chunk's data buffer.
+    // On destruction, it moves the data back to the source chunk unless released.
+    // This ensures data is not lost if an error occurs during the write process,
+    // making the function exception-safe and robust for future modifications.
+    class ChunkDataGuard {
+        Chunk& source_chunk_;
+        memory::vector<std::byte> data_;
+        bool released_ = false;
+
+    public:
+        explicit ChunkDataGuard(Chunk& source_chunk) : source_chunk_(source_chunk), data_(source_chunk.movable_data()) {}
+        ~ChunkDataGuard() {
+            if (!released_) {
+                source_chunk_.set_data(std::move(data_));
+            }
+        }
+        ChunkDataGuard(const ChunkDataGuard&) = delete;
+        ChunkDataGuard& operator=(const ChunkDataGuard&) = delete;
+        ChunkDataGuard(ChunkDataGuard&&) = delete;
+        ChunkDataGuard& operator=(ChunkDataGuard&&) = delete;
+
+        // Release ownership and return the data via move.
+        memory::vector<std::byte>&& release() { released_ = true; return std::move(data_); }
+    };
+}
+
 std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
                                                           std::span<const int64_t> shape,
-                                                          std::span<const std::byte> data) {
+                                                          Chunk& source_chunk,
+                                                          blake3_hash128_t raw_data_hash) {
     if (shape.size() > MAX_SHAPE_DIMENSIONS) {
         return std::unexpected("Shape has an excessive number of dimensions.");
     }
@@ -228,19 +258,14 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
         }
     }
 
-    memory::vector<std::byte> processed_data;
-    if (type == ChunkDataType::ZSTD_COMPRESSED) {
-        auto compress_res = get_zstd_compressor().compress(data);
-        if (!compress_res) return std::unexpected("Zstd compression failed: " + compress_res.error());
-        processed_data = std::move(*compress_res);
-    } else {
-        processed_data.assign(data.begin(), data.end());
-    }
+    // The provided `data` is assumed to be in its final, processed (e.g., compressed) form.
+    // The writer is not responsible for compression.
+    ChunkDataGuard data_guard(source_chunk);
 
     Chunk chunk;
     chunk.set_type(type);
     chunk.set_dtype(dtype);
-    chunk.set_hash(calculate_blake3_hash128(data));
+    chunk.set_hash(raw_data_hash); // Use the provided hash of the original raw data.
     chunk.set_flags(flags);
 
     memory::vector<int64_t> shape_vec;
@@ -252,7 +277,7 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
         shape_vec.assign(shape.begin(), shape.end());
     }
     chunk.set_shape(std::move(shape_vec));
-    chunk.set_data(std::move(processed_data));
+    chunk.set_data(data_guard.release());
 
     size_t calculated_chunk_size_raw =
         sizeof(uint32_t) + // size
@@ -277,6 +302,10 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
     auto end_tell_res = backend_->tell();
     if (!end_tell_res) return std::unexpected(end_tell_res.error());
     const uint64_t end_of_chunk_pos = *end_tell_res;
+    
+    // CRITICAL: Ensure the chunk data is fully flushed to the backend before we seek back to update the index block.
+    // This prevents file corruption when mixing sequential writes and random-access seeks with buffered I/O.
+    if (auto res = backend_->flush(); !res) return std::unexpected(res.error());
 
     auto& current_block = chunk_offset_blocks_.back();
     auto offsets = current_block.offsets_and_pointer();

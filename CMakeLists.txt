@@ -60,7 +60,6 @@ add_library(cryptodd_arrays_lib STATIC
     src/data_io/data_compressor.cpp
     src/c_api/cdd_context.cpp
     src/c_api/c_api.cpp
-    src/c_api/c_api_utils.cpp
         src/c_api/base64.cpp
         src/c_api/operations/store_chunk_handler.cpp
         src/c_api/operations/store_array_handler.cpp
@@ -70,6 +69,7 @@ add_library(cryptodd_arrays_lib STATIC
         src/c_api/operations/flush_handler.cpp
         src/c_api/operations/json_serialization.cpp
         src/c_api/operations/store_utils.cpp
+        src/c_api/operations/ping_handler.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
@@ -106,6 +106,13 @@ find_package(benchmark CONFIG REQUIRED)
 find_package(Python COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 
+# Conditionally add and link mimalloc
+if(USE_MIMALLOC)
+    target_compile_definitions(cryptodd_arrays_lib PUBLIC USE_MIMALLOC)
+    # The library links to mimalloc to use its STL allocator internally
+    target_link_libraries(cryptodd_arrays_lib PRIVATE $<IF:$<TARGET_EXISTS:mimalloc-static>,mimalloc-static,mimalloc>)
+endif()
+
 # Make the library's dependencies public
 target_link_libraries(cryptodd_arrays_lib
         PUBLIC
@@ -120,13 +127,6 @@ target_link_libraries(cryptodd_arrays_lib
         lz4::lz4
         BLAKE3::blake3
 )
-
-# Conditionally add and link mimalloc
-if(USE_MIMALLOC)
-    target_compile_definitions(cryptodd_arrays_lib PUBLIC USE_MIMALLOC)
-    # The library links to mimalloc to use its STL allocator internally
-    target_link_libraries(cryptodd_arrays_lib PUBLIC mimalloc-static)
-endif()
 
 add_library(cryptodd_arrays_shared SHARED
         library.cpp
@@ -163,12 +163,17 @@ add_executable(cryptodd_arrays_test
         test/storage/storage_backend_tests.cpp
         test/test_helpers.cpp
         test/data_io/buffer_test.cpp
+        test/c_api/c_api_tests.cpp
 )
-target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
+target_link_libraries(cryptodd_arrays_test PRIVATE mimalloc GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
+
 if(USE_MIMALLOC)
     target_compile_definitions(cryptodd_arrays_test PUBLIC USE_MIMALLOC)
+    # For the test, we override global new/delete.
     target_sources(cryptodd_arrays_test PRIVATE src/memory/mimalloc_override.cpp)
 endif()
+
+
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)
 

@@ -1,14 +1,15 @@
-#include "../operations/store_utils.h"
-#include "../../codecs/zstd_compressor.h"
-#include "../../data_io/data_writer.h"
-#include "../../data_io/data_compressor.h"
-#include "../../file_format/cdd_file_format.h" // For get_dtype_size
-
 #define MAGIC_ENUM_ENABLE_HASH 1
 #include <magic_enum/magic_enum.hpp>
 #include <numeric> // For std::accumulate
 #include <stdexcept> // For std::runtime_error
 #include <bit> // For std::endian
+
+#include "../operations/store_utils.h"
+#include "../../codecs/zstd_compressor.h"
+#include "../../data_io/data_writer.h"
+#include "../../data_io/data_compressor.h"
+#include "../../file_format/cdd_file_format.h" // For get_dtype_size
+#include "../file_format/blake3_stream_hasher.h"
 
 namespace cryptodd::ffi::StoreUtils {
 
@@ -44,8 +45,8 @@ std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
     std::expected<size_t, std::string> append_result;
     size_t compressed_size = 0;
     size_t original_size = chunk_input_data.size();
+    const blake3_hash128_t raw_data_hash = calculate_blake3_hash128(chunk_input_data);
 
-    // This block handles all non-RAW codecs
     if (codec != cryptodd::ChunkDataType::RAW) {
         std::remove_reference_t<decltype(compressor)>::ChunkResult chunk_result;
         switch (codec) {
@@ -102,17 +103,20 @@ std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
         }
         if (!chunk_result) return std::unexpected(ExpectedError(chunk_result.error().to_string()));
         
-        auto& chunk = *chunk_result;
-        append_result = writer.append_chunk(chunk->type(), chunk->dtype(), flags, chunk->get_shape(), chunk->data());
-        compressed_size = chunk->data().size();
-    } else { // Handle RAW codec separately
-        append_result = writer.append_chunk(codec, data_spec.dtype, flags, data_spec.shape, chunk_input_data);
+        auto& chunk = *chunk_result->get();
+        compressed_size = chunk.data().size(); // Get size BEFORE data is moved inside append_chunk.
+        append_result = writer.append_chunk(chunk.type(), chunk.dtype(), flags, chunk.get_shape(), chunk, raw_data_hash);
+    } else {
+        // For raw data, a temporary chunk must be created to hold the data for the writer.
+        Chunk temp_chunk;
+        temp_chunk.set_data({chunk_input_data.begin(), chunk_input_data.end()});
         compressed_size = chunk_input_data.size();
+        append_result = writer.append_chunk(codec, data_spec.dtype, flags, data_spec.shape, temp_chunk, raw_data_hash);
     }
 
     if (!append_result) return std::unexpected(ExpectedError(append_result.error()));
 
-    double ratio = (original_size == 0) ? 1.0 : static_cast<double>(compressed_size) / original_size;
+    float ratio = (original_size == 0) ? 1.0f : static_cast<float>(compressed_size) / original_size;
 
     return ChunkWriteDetails {
         .chunk_index = *append_result,

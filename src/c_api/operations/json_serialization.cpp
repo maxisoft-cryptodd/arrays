@@ -1,10 +1,10 @@
-#include "../operations/json_serialization.h"
-#include "../operations/operation_types.h"
-#include "../base64.h"
-
 #define MAGIC_ENUM_ENABLE_HASH 1
 #include <magic_enum/magic_enum.hpp>
 #include <nlohmann/json.hpp>
+
+#include "../operations/json_serialization.h"
+#include "../operations/operation_types.h"
+#include "../base64.h"
 
 namespace cryptodd::ffi {
 

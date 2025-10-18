@@ -1,11 +1,11 @@
+#include <nlohmann/json.hpp>
+
 #include "../operations/metadata_handler.h"
 #include "../operations/json_serialization.h"
 #include "../base64.h" // For base64::encode and decode
 #include "../../data_io/data_reader.h" // For DataReader
 #include "../../data_io/data_writer.h" // For DataWriter
 #include "../../file_format/cdd_file_format.h" // For FileHeader
-#include <nlohmann/json.hpp>
-#include <algorithm> // For std::transform
 
 namespace cryptodd::ffi {
 
