@@ -64,11 +64,12 @@ add_library(cryptodd_arrays_lib STATIC
         src/c_api/base64.cpp
         src/c_api/operations/store_chunk_handler.cpp
         src/c_api/operations/store_array_handler.cpp
-        src/c_api/operations/store_op_handler_base.cpp
         src/c_api/operations/inspect_handler.cpp
         src/c_api/operations/load_chunks_handler.cpp
         src/c_api/operations/metadata_handler.cpp
         src/c_api/operations/flush_handler.cpp
+        src/c_api/operations/json_serialization.cpp
+        src/c_api/operations/store_utils.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")

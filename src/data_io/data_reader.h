@@ -1,12 +1,10 @@
 #pragma once
 
-#include <cstdint>
 #include <vector>
 #include <string>
 #include <memory>
 #include <stdexcept>
 #include <expected>
-#include <numeric> // For std::iota
 #include <filesystem>
 #include <mutex>
 #include <span>
@@ -25,6 +23,9 @@ class DataReader {
     memory::vector<uint64_t> master_chunk_offsets_; // Consolidated index of all chunk offsets
     mutable std::optional<ZstdCompressor> zstd_compressor_;
     mutable std::once_flag zstd_init_flag_;
+
+    uint64_t index_block_offset_{0};
+    uint64_t index_block_size_{0};
 
     ZstdCompressor& get_zstd_compressor() const;
 
@@ -54,6 +55,9 @@ public:
 
     // Returns the total number of chunks in the file
     [[nodiscard]] size_t num_chunks() const { return master_chunk_offsets_.size(); }
+
+    [[nodiscard]] uint64_t get_index_block_offset() const { return index_block_offset_; }
+    [[nodiscard]] uint64_t get_index_block_size() const { return index_block_size_; }
 
     // Retrieves a specific chunk by its index. Returns an error on failure.
     std::expected<Chunk, std::string> get_chunk(size_t index);

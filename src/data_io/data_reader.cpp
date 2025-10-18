@@ -59,6 +59,10 @@ DataReader::DataReader(Create, std::unique_ptr<IStorageBackend>&& backend) : bac
         auto tell_res = backend_->tell();
         if (!tell_res) return std::unexpected(tell_res.error());
 
+        // FIX: Capture the starting offset of the first index block. This is our index_block_offset_.
+        index_block_offset_ = *tell_res;
+        uint64_t total_index_size = 0;
+
         uint64_t current_block_offset = *tell_res;
         while (current_block_offset != 0) {
             if (auto seek_res = backend_->seek(current_block_offset); !seek_res) {
@@ -68,6 +72,9 @@ DataReader::DataReader(Create, std::unique_ptr<IStorageBackend>&& backend) : bac
             if (auto read_res = block.read(*backend_); !read_res) {
                 return std::unexpected(read_res.error());
             }
+            
+            // FIX: Add the size of the block we just read to the total.
+            total_index_size += block.size();
 
             // Verify the integrity of the index block itself
             Blake3StreamHasher block_hasher;
@@ -92,6 +99,10 @@ DataReader::DataReader(Create, std::unique_ptr<IStorageBackend>&& backend) : bac
                 current_block_offset = block.get_next_index_offset();
             }
         }
+        
+        // FIX: Store the total calculated size of all index blocks.
+        index_block_size_ = total_index_size;
+        
         return {};
     }();
 

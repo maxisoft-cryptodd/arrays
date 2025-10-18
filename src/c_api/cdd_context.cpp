@@ -14,14 +14,18 @@
 #include "operations/operation_handler.h"
 #include "operations/store_array_handler.h"
 #include "operations/store_chunk_handler.h"
+#include "operations/ping_handler.h" // Include PingHandler
 
 namespace cryptodd::ffi {
 
 CddContext::CddContext(
     ProtectedMarker,
     std::unique_ptr<DataReader>&& reader,
-    std::unique_ptr<DataWriter>&& writer
-) : reader_(std::move(reader)), writer_(std::move(writer)), compressor_(), extractor_() {}
+    std::unique_ptr<DataWriter>&& writer,
+    std::string backend_type,
+    std::string mode
+) : reader_(std::move(reader)), writer_(std::move(writer)), compressor_(), extractor_(),
+    backend_type_(std::move(backend_type)), mode_(std::move(mode)) {}
 
 CddContext::~CddContext() {
     if (writer_) {
@@ -74,7 +78,7 @@ std::expected<std::unique_ptr<CddContext>, ExpectedError> CddContext::create(con
             writer = std::move(*writer_result);
         }
         
-        return std::make_unique<CddContext>(ProtectedMarker{}, std::move(reader), std::move(writer));
+        return std::make_unique<CddContext>(ProtectedMarker{}, std::move(reader), std::move(writer), type, mode_str);
 
     } catch(const nlohmann::json::exception& e) {
         return std::unexpected(ExpectedError(std::string("JSON configuration error: ") + e.what()));
@@ -118,7 +122,8 @@ std::expected<nlohmann::json, ExpectedError> CddContext::execute_operation(
         {"LoadChunks",      []() { return std::make_unique<LoadChunksHandler>(); }},
         {"GetUserMetadata", []() { return std::make_unique<GetUserMetadataHandler>(); }},
         {"SetUserMetadata", []() { return std::make_unique<SetUserMetadataHandler>(); }},
-        {"Flush",           []() { return std::make_unique<FlushHandler>(); }}
+        {"Flush",           []() { return std::make_unique<FlushHandler>(); }},
+        {"Ping",            []() { return std::make_unique<PingHandler>(); }}
     };
 
     try {
@@ -126,10 +131,6 @@ std::expected<nlohmann::json, ExpectedError> CddContext::execute_operation(
 
         auto it = op_handlers.find(op_type);
         if (it == op_handlers.end()) {
-            // Handle special cases like "Ping" that don't need a handler class.
-            if (op_type == "Ping") {
-                return nlohmann::json{{"message", "Pong"}};
-            }
             return std::unexpected(ExpectedError("Unknown or unsupported op_type: " + op_type));
         }
 

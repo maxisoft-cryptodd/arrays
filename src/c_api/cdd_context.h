@@ -65,7 +65,15 @@ protected:
     struct ProtectedMarker{};
 
 public:
-    CddContext(ProtectedMarker, std::unique_ptr<DataReader>&& reader, std::unique_ptr<DataWriter>&& writer);
+    CddContext(ProtectedMarker, std::unique_ptr<DataReader>&& reader, std::unique_ptr<DataWriter>&& writer,
+               std::string backend_type, std::string mode);
+
+    std::string_view get_backend_type() const { return backend_type_; }
+    std::string_view get_mode() const { return mode_; }
+
+private:
+    std::string backend_type_;
+    std::string mode_;
 };
 
 } // namespace cryptodd::ffi
