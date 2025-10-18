@@ -1,8 +1,10 @@
 #pragma once
 
-#include "i_storage_backend.h"
 #include <filesystem>
 #include <fstream>
+#include <atomic>
+
+#include "i_storage_backend.h"
 
 namespace cryptodd::storage {
 
@@ -13,6 +15,7 @@ private:
 
     std::fstream file_;
     std::filesystem::path filepath_;
+    std::atomic_bool write_pending_ = false;
 
 public:
     explicit FileBackend(std::filesystem::path filepath,

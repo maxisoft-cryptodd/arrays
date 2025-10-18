@@ -57,14 +57,31 @@ std::expected<size_t, std::string> FileBackend::write(std::span<const std::byte>
     if (!file_.good()) {
         return std::unexpected("Failed to write data to file.");
     }
+    write_pending_ = true;
     return data.size();
 }
 
 std::expected<void, std::string> FileBackend::seek(uint64_t offset) {
+    // CRITICAL: Prevent file corruption from buffered writes followed by a seek.
+    // If there is pending write data in the fstream buffer, a subsequent seek can
+    // cause that buffered data to be flushed at the new, incorrect file position.
+    if (write_pending_) {
+        // Optimization: Avoid an expensive flush if the seek is a no-op (i.e., seeking to the current position).
+        auto current_pos_res = tell();
+        if (!current_pos_res) {
+            return std::unexpected("Failed to get current position for seek-flush check: " + current_pos_res.error());
+        }
+
+        if (*current_pos_res != offset) {
+            if (auto flush_res = flush(); !flush_res) {
+                return flush_res; // Propagate the flush error.
+            }
+        }
+    }
+
     if (offset > static_cast<uint64_t>(std::numeric_limits<off_type>::max())) {
         return std::unexpected("File offset is too large for fstream.");
     }
-
     // --- EAGER RESIZING LOGIC ---
     // Align behavior with MemoryBackend by resizing the file if seeking past the end.
     auto current_size_res = size();
@@ -111,10 +128,12 @@ std::expected<void, std::string> FileBackend::flush() {
     if (!file_.good()) {
         return std::unexpected("Failed to flush file stream.");
     }
+    write_pending_ = false;
     return {};
 }
 
 std::expected<void, std::string> FileBackend::rewind() {
+    file_.flush();
     file_.clear();
     file_.seekg(0);
     file_.seekp(0);
@@ -125,13 +144,12 @@ std::expected<void, std::string> FileBackend::rewind() {
 }
 
 std::expected<uint64_t, std::string> FileBackend::size() {
-    // Flush any pending writes to ensure the on-disk size is accurate.
-    file_.flush();
-    if(!file_.good()){
-        // If flushing fails, the subsequent size check might be invalid.
-        return std::unexpected("File stream in bad state before getting size.");
+    // To get an accurate file size from the OS, any pending write data in the buffer must be flushed first.
+    if (write_pending_) {
+        if (auto flush_res = flush(); !flush_res) {
+            return std::unexpected("Failed to flush before getting size: " + flush_res.error());
+        }
     }
-    
     std::error_code ec;
     const auto file_size = std::filesystem::file_size(filepath_, ec);
     if (ec) {
