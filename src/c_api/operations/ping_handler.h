@@ -5,13 +5,13 @@
 #include <span>
 
 namespace cryptodd::ffi {
-class StoreChunkHandler final : public IOperationHandler {
+class PingHandler final : public IOperationHandler {
 public:
     std::expected<nlohmann::json, ExpectedError> execute(
         CddContext& context, const nlohmann::json& op_request,
         std::span<const std::byte> input_data, std::span<std::byte> output_data) override;
 private:
-    std::expected<StoreChunkResponse, ExpectedError> execute_typed(
-        CddContext& context, const StoreChunkRequest& request, std::span<const std::byte> input_data);
+    std::expected<PingResponse, ExpectedError> execute_typed(
+        CddContext& context, const PingRequest& request);
 };
 } // namespace cryptodd::ffi

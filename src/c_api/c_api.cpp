@@ -2,16 +2,18 @@
 #include "../c_api/cdd_context.h"
 
 #include <nlohmann/json.hpp>
-#include <unordered_map>
+#include <map>
 #include <mutex>
 #include <atomic>
 #include <string_view>
 #include <memory>
 #include <string>
+#include <chrono> // For timing
+#include <cstring> // For strncpy
 
 namespace {
     std::mutex g_context_map_mutex;
-    std::unordered_map<cdd_handle_t, std::unique_ptr<cryptodd::ffi::CddContext>> g_contexts;
+    std::map<cdd_handle_t, std::unique_ptr<cryptodd::ffi::CddContext>> g_contexts;
     std::atomic<cdd_handle_t> g_next_handle{1}; // Start handles at 1, as 0 can be a sentinel value
 }
 
@@ -83,13 +85,27 @@ CRYPTODD_API cdd_handle_t cdd_context_create(const char* json_config, size_t con
 
 
         assert(!contains_handle(handle));
+        if (contains_handle(handle))
+        {
+            return CDD_ERROR_INVALID_HANDLE;
+        }
         {
             std::lock_guard lock(g_context_map_mutex);
 
-            g_contexts[handle] = std::move(*context_result);
+            auto [it, success] = g_contexts.try_emplace(handle, std::move(context_result.value()));
+            assert(success);
+            if (!success)
+            {
+                return CDD_ERROR_INVALID_HANDLE;
+            }
+            handle = it->first;
         }
 
         assert(handle > 0);
+        if (handle <= 0)
+        {
+            return CDD_ERROR_INVALID_HANDLE;
+        }
         return handle;
 
     } catch (const nlohmann::json::parse_error&) {
@@ -143,14 +159,24 @@ CRYPTODD_API int64_t cdd_execute_op(
             cryptodd::ffi::CddContext& context = *(it->second);
             lock.unlock(); // Release lock while the potentially long operation is running
 
+            auto start_time = std::chrono::high_resolution_clock::now(); // Start timing
+
             auto op_result = context.execute_operation(
                 request_json,
-                {static_cast<const std::byte*>(input_data_ptr), (size_t)input_data_bytes},
-                {static_cast<std::byte*>(output_data_ptr), (size_t)max_output_data_bytes}
+                {static_cast<const std::byte*>(input_data_ptr), static_cast<size_t>(input_data_bytes)},
+                {static_cast<std::byte*>(output_data_ptr), static_cast<size_t>(max_output_data_bytes)}
             );
             
+            auto end_time = std::chrono::high_resolution_clock::now(); // End timing
+            auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+
             nlohmann::json final_response;
             if (op_result) {
+                // Inject metadata into the successful result
+                (*op_result)["metadata"]["duration_us"] = duration_us;
+                (*op_result)["metadata"]["backend_type"] = context.get_backend_type();
+                (*op_result)["metadata"]["mode"] = context.get_mode();
+                
                 final_response = {{"status", "Success"}, {"result", *op_result}};
                 final_status_code = CDD_SUCCESS;
             } else {
@@ -168,11 +194,18 @@ CRYPTODD_API int64_t cdd_execute_op(
     }
 
     if (response_str.length() + 1 > max_json_response_bytes) {
+        // FIX: Safely write truncated error message.
+        if (max_json_response_bytes > 0) {
+            auto truncated_msg = create_error_json(CDD_ERROR_RESPONSE_BUFFER_TOO_SMALL, cdd_error_message(CDD_ERROR_RESPONSE_BUFFER_TOO_SMALL)).dump();
+            // Use std::string::copy for a safer, more idiomatic C++ way to handle truncation.
+            const size_t bytes_to_copy = std::min(truncated_msg.length(), max_json_response_bytes - 1);
+            truncated_msg.copy(json_op_response, bytes_to_copy);
+            json_op_response[bytes_to_copy] = '\0';
+        }
         return CDD_ERROR_RESPONSE_BUFFER_TOO_SMALL;
     }
 
-    memcpy(json_op_response, response_str.c_str(), response_str.length());
-    json_op_response[response_str.length() + 1] = 0;
+    memcpy(json_op_response, response_str.c_str(), response_str.length() + 1); // include null terminator
     
     return final_status_code;
 }
