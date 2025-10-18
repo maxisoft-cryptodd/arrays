@@ -1,6 +1,6 @@
 #include "store_array_handler.h"
-#include "../c_api/c_api_utils.h"
 #include <numeric>
+#include "../c_api_utils.h"
 
 namespace cryptodd::ffi {
 
@@ -10,7 +10,7 @@ std::expected<nlohmann::json, ExpectedError> StoreArrayHandler::execute(
     CddContext& context,
     const nlohmann::json& op_request,
     std::span<const std::byte> input_data,
-    std::span<const std::byte> /*output_data*/)
+    std::span<std::byte> /*output_data*/)
 {
     auto writer_opt = context.get_writer();
     if (!writer_opt) return std::unexpected(ExpectedError("Context is not in a writable mode."));

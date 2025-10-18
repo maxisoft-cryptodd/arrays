@@ -77,6 +77,7 @@ CRYPTODD_API cdd_handle_t cdd_context_create(const char* json_config, size_t con
             if (handle < 0)
             {
                 g_next_handle.compare_exchange_strong(handle, 1);
+                handle = 0;
             }
         } while (handle <= 0 || contains_handle(handle));
 
@@ -170,7 +171,8 @@ CRYPTODD_API int64_t cdd_execute_op(
         return CDD_ERROR_RESPONSE_BUFFER_TOO_SMALL;
     }
 
-    memcpy(json_op_response, response_str.c_str(), response_str.length() + 1);
+    memcpy(json_op_response, response_str.c_str(), response_str.length());
+    json_op_response[response_str.length() + 1] = 0;
     
     return final_status_code;
 }

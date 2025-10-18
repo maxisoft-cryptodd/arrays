@@ -61,9 +61,14 @@ add_library(cryptodd_arrays_lib STATIC
     src/c_api/cdd_context.cpp
     src/c_api/c_api.cpp
     src/c_api/c_api_utils.cpp
-    src/c_api/store_chunk_handler.cpp
-        src/c_api/store_array_handler.cpp
-        src/c_api/store_op_handler_base.cpp
+        src/c_api/base64.cpp
+        src/c_api/operations/store_chunk_handler.cpp
+        src/c_api/operations/store_array_handler.cpp
+        src/c_api/operations/store_op_handler_base.cpp
+        src/c_api/operations/inspect_handler.cpp
+        src/c_api/operations/load_chunks_handler.cpp
+        src/c_api/operations/metadata_handler.cpp
+        src/c_api/operations/flush_handler.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
@@ -91,6 +96,8 @@ find_package(hwy CONFIG REQUIRED)
 find_package(mio CONFIG REQUIRED)
 find_package(mimalloc CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(turbobase64 CONFIG REQUIRED)
+find_package(magic_enum CONFIG REQUIRED)
 
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
@@ -99,14 +106,18 @@ find_package(Python COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 
 # Make the library's dependencies public
-target_link_libraries(cryptodd_arrays_lib PUBLIC
+target_link_libraries(cryptodd_arrays_lib
+        PUBLIC
         zstd::libzstd
+        stduuid
+        nlohmann_json::nlohmann_json
+        magic_enum::magic_enum
+        PRIVATE
+        turbo::base64
+        mio::mio mio::mio-headers
+        hwy::hwy
         lz4::lz4
         BLAKE3::blake3
-        stduuid
-        hwy::hwy
-        mio::mio mio::mio-headers
-        nlohmann_json::nlohmann_json
 )
 
 # Conditionally add and link mimalloc

@@ -304,6 +304,13 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
     return new_chunk_index;
 }
 
+std::expected<void, std::string> DataWriter::set_user_metadata(std::span<const std::byte> user_metadata) {
+    file_header_.set_user_metadata({user_metadata.begin(), user_metadata.end()});
+    // Re-write the header at the beginning of the file.
+    if (auto res = backend_->seek(0); !res) return std::unexpected(res.error());
+    return file_header_.write(*backend_);
+}
+
 std::expected<void, std::string> DataWriter::flush() {
     return backend_->flush();
 }

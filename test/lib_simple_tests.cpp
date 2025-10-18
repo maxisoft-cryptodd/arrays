@@ -3,6 +3,7 @@
 #include <lz4.h>  // For lz4
 #include <blake3.h> // For blake3
 #include <vector>
+#include <turbobase64/turbob64.h>
 #include <string>
 #include <cstring> // For strlen, memcmp
 #include <cstdint> // For uint8_t
@@ -83,4 +84,32 @@ TEST(Blake3Test, Hashing) {
     // The known BLAKE3 hash for "hello"
     const std::string expected_hash_hex = "ea8f163db38682925e4491c5e58d4bb3506ef8c14eb78a86e908c5624a67200f";
     ASSERT_EQ(calculated_hash_hex, expected_hash_hex);
+}
+
+// Test for turbobase64
+TEST(TurboBase64Test, EncodeDecode) {
+    const char* original_data = "This is a simple test string for the turbobase64 library.";
+    const size_t original_size = strlen(original_data);
+
+    // Encode
+    const size_t encoded_len_bound = tb64enclen(original_size);
+    std::vector<char> encoded_data(encoded_len_bound);
+    const size_t encoded_size = tb64enc(
+        reinterpret_cast<const unsigned char*>(original_data),
+        original_size,
+        reinterpret_cast<unsigned char*>(encoded_data.data())
+    );
+    ASSERT_GT(encoded_size, 0) << "turbobase64 encoding failed";
+
+    // Decode
+    std::vector<char> decoded_data(original_size);
+    const size_t decoded_size = tb64dec(
+        reinterpret_cast<const unsigned char*>(encoded_data.data()),
+        encoded_size,
+        reinterpret_cast<unsigned char*>(decoded_data.data())
+    );
+    ASSERT_EQ(decoded_size, original_size) << "turbobase64 decoding failed or produced incorrect size";
+
+    // Verify
+    ASSERT_EQ(0, memcmp(original_data, decoded_data.data(), original_size));
 }
