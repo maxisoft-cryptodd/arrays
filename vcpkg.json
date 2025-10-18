@@ -9,6 +9,8 @@
     "mio",
     "mimalloc",
     "nlohmann-json",
+    "turbobase64",
+    "magic-enum",
     {
       "name": "mimalloc",
       "features": [

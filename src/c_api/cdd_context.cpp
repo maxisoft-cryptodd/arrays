@@ -1,25 +1,30 @@
 #include "cdd_context.h"
-#include "operation_handler.h"
-#include "store_chunk_handler.h"
+#include <functional>
+#include <iostream>
+#include <string>
+#include <unordered_map>
 #include "../data_io/data_reader.h"
 #include "../data_io/data_writer.h"
 #include "../storage/file_backend.h"
 #include "../storage/memory_backend.h"
-#include <string>
-#include <iostream>
+#include "operations/flush_handler.h"
+#include "operations/inspect_handler.h"
+#include "operations/load_chunks_handler.h"
+#include "operations/metadata_handler.h"
+#include "operations/operation_handler.h"
+#include "operations/store_array_handler.h"
+#include "operations/store_chunk_handler.h"
 
 namespace cryptodd::ffi {
 
-// Constructor now also initializes the compressor
 CddContext::CddContext(
     ProtectedMarker,
     std::unique_ptr<DataReader>&& reader,
     std::unique_ptr<DataWriter>&& writer
-) : reader_(std::move(reader)), writer_(std::move(writer)), compressor_() {}
+) : reader_(std::move(reader)), writer_(std::move(writer)), compressor_(), extractor_() {}
 
 CddContext::~CddContext() {
     if (writer_) {
-        // Ensure data is flushed on context destruction
         if (auto flushed = writer_->flush(); !flushed)
         {
             std::cerr << "Error flushing data: " << flushed.error() << std::endl;
@@ -74,7 +79,7 @@ std::expected<std::unique_ptr<CddContext>, ExpectedError> CddContext::create(con
     } catch(const nlohmann::json::exception& e) {
         return std::unexpected(ExpectedError(std::string("JSON configuration error: ") + e.what()));
     }
-} // Correct closing brace for CddContext::create
+}
 
 std::optional<std::reference_wrapper<DataWriter>> CddContext::get_writer() {
     if (writer_) {
@@ -90,26 +95,46 @@ std::optional<std::reference_wrapper<DataReader>> CddContext::get_reader() {
     return std::nullopt;
 }
 
+std::span<const std::byte> CddContext::get_zero_state(size_t byte_size) {
+    std::lock_guard lock(zero_state_cache_mutex_);
+    auto it = zero_state_cache_.find(byte_size);
+    if (it == zero_state_cache_.end()) {
+        it = zero_state_cache_.try_emplace(byte_size, byte_size, std::byte{0}).first;
+    }
+    return it->second;
+}
+
 std::expected<nlohmann::json, ExpectedError> CddContext::execute_operation(
     const nlohmann::json& op_request,
     std::span<const std::byte> input_data,
-    std::span<const std::byte> output_data)
+    std::span<std::byte> output_data)
 {
+    // Using a static dispatch map is more efficient and scalable than an if-else chain.
+    using HandlerFactory = std::function<std::unique_ptr<IOperationHandler>()>;
+    static const std::unordered_map<std::string, HandlerFactory> op_handlers = {
+        {"StoreChunk",      []() { return std::make_unique<StoreChunkHandler>(); }},
+        {"StoreArray",      []() { return std::make_unique<StoreArrayHandler>(); }},
+        {"Inspect",         []() { return std::make_unique<InspectHandler>(); }},
+        {"LoadChunks",      []() { return std::make_unique<LoadChunksHandler>(); }},
+        {"GetUserMetadata", []() { return std::make_unique<GetUserMetadataHandler>(); }},
+        {"SetUserMetadata", []() { return std::make_unique<SetUserMetadataHandler>(); }},
+        {"Flush",           []() { return std::make_unique<FlushHandler>(); }}
+    };
+
     try {
         const std::string op_type = op_request.at("op_type").get<std::string>();
 
-        std::unique_ptr<IOperationHandler> handler;
-        if (op_type == "Ping") {
-            return nlohmann::json{{"message", "Pong"}};
-        } else if (op_type == "StoreChunk") {
-            handler = std::make_unique<StoreChunkHandler>();
-        } else if (op_type == "StoreArray") {
-
-            return std::unexpected(ExpectedError("op_type 'StoreArray' is not yet implemented."));
-        } else {
+        auto it = op_handlers.find(op_type);
+        if (it == op_handlers.end()) {
+            // Handle special cases like "Ping" that don't need a handler class.
+            if (op_type == "Ping") {
+                return nlohmann::json{{"message", "Pong"}};
+            }
             return std::unexpected(ExpectedError("Unknown or unsupported op_type: " + op_type));
         }
 
+        // Create and execute the handler from the map.
+        auto handler = it->second();
         return handler->execute(*this, op_request, input_data, output_data);
 
     } catch(const nlohmann::json::exception& e) {

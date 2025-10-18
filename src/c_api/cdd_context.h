@@ -3,6 +3,7 @@
 #include "../data_io/data_reader.h"
 #include "../data_io/data_writer.h"
 #include "../data_io/data_compressor.h"
+#include "../data_io/data_extractor.h" // ADDED
 #include <nlohmann/json.hpp>
 #include <expected>
 #include <memory>
@@ -31,13 +32,14 @@ public:
     std::expected<nlohmann::json, ExpectedError> execute_operation(
         const nlohmann::json& op_request,
         std::span<const std::byte> input_data,
-        std::span<const std::byte> output_data
+        std::span<std::byte> output_data
     );
 
     // Getters for handlers
     std::optional<std::reference_wrapper<DataWriter>> get_writer();
     std::optional<std::reference_wrapper<DataReader>> get_reader();
     DataCompressor& get_compressor() { return compressor_; }
+    DataExtractor& get_extractor() { return extractor_; } // ADDED
     
     // Method to get a zero-filled span for initial codec states, with caching.
     std::span<const std::byte> get_zero_state(size_t byte_size);
@@ -53,6 +55,7 @@ private:
     std::unique_ptr<DataReader> reader_;
     std::unique_ptr<DataWriter> writer_;
     DataCompressor compressor_; // Reusable compressor
+    DataExtractor extractor_; // ADDED
 
     // Cache for zero-initialized previous states to avoid repeated allocations.
     std::map<size_t, memory::vector<std::byte>> zero_state_cache_;

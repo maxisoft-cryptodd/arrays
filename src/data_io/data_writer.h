@@ -93,6 +93,13 @@ public:
                                                   std::span<const int64_t> shape, std::span<const std::byte> data);
 
     /**
+     * @brief Updates the user metadata in the file header.
+     * @param user_metadata The new user metadata.
+     * @return void on success, or an error string.
+     */
+    std::expected<void, std::string> set_user_metadata(std::span<const std::byte> user_metadata);
+
+    /**
      * @brief Flushes any buffered data to the underlying storage.
      * @return void on success, or an error string.
      */

@@ -1,6 +1,6 @@
 #include "store_op_handler_base.h"
-#include <numeric>
 #include <bit>
+#include <numeric>
 
 namespace cryptodd::ffi {
 
