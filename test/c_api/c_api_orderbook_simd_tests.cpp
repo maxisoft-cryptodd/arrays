@@ -14,19 +14,6 @@
 #include <hwy/base.h>
 #include "float_conversion_simd_codec.h"
 
-#if defined(__has_include)
-  #if __has_include(<stdfloat>)
-    #include <stdfloat>
-  #endif
-#endif
-
-
-#if defined(__STDCPP_FLOAT16_T__) and __STDCPP_FLOAT16_T__ == 1
-using float16_t = __STDCPP_FLOAT16_T__;
-#else
-using float16_t = hwy::float16_t;
-#endif
-
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
