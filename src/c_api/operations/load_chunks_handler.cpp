@@ -119,6 +119,17 @@ std::expected<LoadChunksResponse, ExpectedError> LoadChunksHandler::execute_type
         if (!buffer_result) return std::unexpected(ExpectedError(buffer_result.error().to_string()));
         
         auto decoded_span = (*buffer_result)->as_bytes();
+
+        // =========================================================
+        // "SUPER SAFE" CHECK (Defense-in-Depth)
+        // =========================================================
+        if (current_offset + decoded_span.size() > output_data.size()) {
+            // This indicates a bug in a codec, as the pre-flight check should have caught this.
+            return std::unexpected(ExpectedError(
+                "Internal error: Codec produced more data than predicted by its metadata. Aborting to prevent buffer overflow."
+            ));
+        }
+
         if (check_hash)
         {
             if (!hash)
