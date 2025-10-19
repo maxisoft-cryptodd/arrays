@@ -70,6 +70,7 @@ add_library(cryptodd_arrays_lib STATIC
         src/c_api/operations/json_serialization.cpp
         src/c_api/operations/store_utils.cpp
         src/c_api/operations/ping_handler.cpp
+        src/codecs/float_conversion_simd_codec.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
@@ -164,6 +165,9 @@ add_executable(cryptodd_arrays_test
         test/test_helpers.cpp
         test/data_io/buffer_test.cpp
         test/c_api/c_api_tests.cpp
+        test/helpers/orderbook_generator.cpp
+        test/c_api/c_api_simd_tests.cpp
+        test/codecs/float_conversion_simd_codec_test.cpp
 )
 target_link_libraries(cryptodd_arrays_test PRIVATE mimalloc GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
 
