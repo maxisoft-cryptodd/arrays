@@ -9,7 +9,7 @@
 namespace cryptodd
 {
 
-    using blake3_hash128_t = std::array<uint64_t, 2>;
+    using blake3_hash256_t = std::array<uint64_t, 4>;
 
     /**
      * @brief A stateful C++ wrapper for the blake3 streaming hash API.
@@ -54,9 +54,9 @@ namespace cryptodd
 
         /**
          * @brief Finalizes the hash and returns a 128-bit (16-byte) hash.
-         * @return A blake3_hash128_t containing the hash.
+         * @return A blake3_hash256_t containing the hash.
          */
-        [[nodiscard]] blake3_hash128_t finalize_128() const;
+        [[nodiscard]] blake3_hash256_t finalize_256() const;
 
         void update_bytes(std::span<const std::byte> data);
 
@@ -73,39 +73,39 @@ namespace cryptodd
     namespace details
     {
         template <typename T>
-        blake3_hash128_t calculate_blake3_hash128(std::span<const T> d)
+        blake3_hash256_t calculate_blake3_hash256(std::span<const T> d)
         {
             Blake3StreamHasher h;
             h.update(d);
-            return h.finalize_128();
+            return h.finalize_256();
         }
     } // namespace details
 
     template <typename T, typename Allocator = std::allocator<T>>
-    blake3_hash128_t calculate_blake3_hash128(const std::vector<T, Allocator>& v)
+    blake3_hash256_t calculate_blake3_hash256(const std::vector<T, Allocator>& v)
     {
         std::span<const T> span = v;
-        return calculate_blake3_hash128<T>(span);
+        return calculate_blake3_hash256<T>(span);
     }
 
     template <typename T>
-    blake3_hash128_t calculate_blake3_hash128(const memory::vector<T>& v)
+    blake3_hash256_t calculate_blake3_hash256(const memory::vector<T>& v)
     {
         std::span<const T> span = v;
-        return details::calculate_blake3_hash128(span);
+        return details::calculate_blake3_hash256(span);
     }
 
     template <typename T>
-    blake3_hash128_t calculate_blake3_hash128(std::span<const T> d)
+    blake3_hash256_t calculate_blake3_hash256(std::span<const T> d)
     {
-        return details::calculate_blake3_hash128(d);
+        return details::calculate_blake3_hash256(d);
     }
 
     template <typename T>
-    blake3_hash128_t calculate_blake3_hash128(std::span<T> d)
+    blake3_hash256_t calculate_blake3_hash256(std::span<T> d)
     {
         std::span<const T> span = d;
-        return details::calculate_blake3_hash128(span);
+        return details::calculate_blake3_hash256(span);
     }
 
 } // namespace cryptodd

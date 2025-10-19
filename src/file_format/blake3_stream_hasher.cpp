@@ -48,11 +48,11 @@ memory::vector<std::byte> Blake3StreamHasher::finalize(size_t out_len) const {
     return hash_bytes;
 }
 
-blake3_hash128_t Blake3StreamHasher::finalize_128() const {
+blake3_hash256_t Blake3StreamHasher::finalize_256() const {
     if (!pimpl_->is_initialized_) {
         throw std::logic_error("Hasher has not been initialized before finalizing.");
     }
-    blake3_hash128_t hash_u64{};
+    blake3_hash256_t hash_u64{};
     blake3_hasher_finalize(&pimpl_->hasher_, reinterpret_cast<uint8_t*>(&hash_u64), sizeof(hash_u64));
     return hash_u64;
 }

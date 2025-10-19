@@ -97,7 +97,7 @@ TEST_F(CddFileTest, WriteAndReadSingleChunk) {
         auto compressed_data_res = compressor.compress(original_data);
         ASSERT_TRUE(compressed_data_res.has_value()) << compressed_data_res.error();
 
-        const auto raw_data_hash = calculate_blake3_hash128(original_data);
+        const auto raw_data_hash = calculate_blake3_hash256(original_data);
         Chunk temp_chunk;
         temp_chunk.set_data(std::move(*compressed_data_res));
         auto append_result = writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape, temp_chunk, raw_data_hash);
@@ -143,7 +143,7 @@ TEST_F(CddFileTest, WriterRejectsNegativeShape) {
     ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
     auto writer = std::move(*writer_result);
 
-    const auto raw_data_hash = calculate_blake3_hash128(data);
+    const auto raw_data_hash = calculate_blake3_hash256(data);
     Chunk temp_chunk;
     temp_chunk.set_data({data.begin(), data.end()});
     auto append_result = writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, temp_chunk, raw_data_hash);
@@ -167,14 +167,14 @@ TEST_F(CddFileTest, WriteAndReadMultipleChunksSingleBlock) {
         ZstdCompressor compressor;
         auto compressed_data1_res = compressor.compress(data1);
         ASSERT_TRUE(compressed_data1_res.has_value()) << compressed_data1_res.error();
-        const auto hash1 = calculate_blake3_hash128(data1);
+        const auto hash1 = calculate_blake3_hash256(data1);
         Chunk chunk1; 
         chunk1.set_data(std::move(*compressed_data1_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape1, chunk1, hash1).has_value());
 
         auto compressed_data2_res = compressor.compress(data2);
         ASSERT_TRUE(compressed_data2_res.has_value()) << compressed_data2_res.error();
-        const auto hash2 = calculate_blake3_hash128(data2);
+        const auto hash2 = calculate_blake3_hash256(data2);
         Chunk chunk2;
         chunk2.set_data(std::move(*compressed_data2_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape2, chunk2, hash2).has_value());
@@ -226,21 +226,21 @@ TEST_F(CddFileTest, WriteAndReadMultipleChunksMultipleBlocks) {
         ZstdCompressor compressor;
         auto compressed_data1_res = compressor.compress(data1);
         ASSERT_TRUE(compressed_data1_res.has_value()) << compressed_data1_res.error();
-        const auto hash1 = calculate_blake3_hash128(data1);
+        const auto hash1 = calculate_blake3_hash256(data1);
         Chunk chunk1; 
         chunk1.set_data(std::move(*compressed_data1_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape1, chunk1, hash1).has_value());
 
         auto compressed_data2_res = compressor.compress(data2);
         ASSERT_TRUE(compressed_data2_res.has_value()) << compressed_data2_res.error();
-        const auto hash2 = calculate_blake3_hash128(data2);
+        const auto hash2 = calculate_blake3_hash256(data2);
         Chunk chunk2;
         chunk2.set_data(std::move(*compressed_data2_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape2, chunk2, hash2).has_value());
 
         auto compressed_data3_res = compressor.compress(data3);
         ASSERT_TRUE(compressed_data3_res.has_value()) << compressed_data3_res.error();
-        const auto hash3 = calculate_blake3_hash128(data3);
+        const auto hash3 = calculate_blake3_hash256(data3);
         Chunk chunk3;
         chunk3.set_data(std::move(*compressed_data3_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape3, chunk3, hash3).has_value());
@@ -297,7 +297,7 @@ TEST_F(CddFileTest, AppendToExistingFile) {
         ZstdCompressor compressor;
         auto compressed_data1_res = compressor.compress(data1);
         ASSERT_TRUE(compressed_data1_res.has_value()) << compressed_data1_res.error();
-        const auto hash1 = calculate_blake3_hash128(data1);
+        const auto hash1 = calculate_blake3_hash256(data1);
         Chunk chunk1;
         chunk1.set_data(std::move(*compressed_data1_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape1, chunk1, hash1).has_value());
@@ -316,7 +316,7 @@ TEST_F(CddFileTest, AppendToExistingFile) {
         ZstdCompressor compressor;
         auto compressed_data2_res = compressor.compress(data2);
         ASSERT_TRUE(compressed_data2_res.has_value()) << compressed_data2_res.error();
-        const auto hash2 = calculate_blake3_hash128(data2);
+        const auto hash2 = calculate_blake3_hash256(data2);
         Chunk chunk2;
         chunk2.set_data(std::move(*compressed_data2_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape2, chunk2, hash2).has_value());
@@ -370,28 +370,28 @@ TEST_F(CddFileTest, GetChunkSlice) {
         ZstdCompressor compressor;
         auto compressed_data1_res = compressor.compress(data1);
         ASSERT_TRUE(compressed_data1_res.has_value()) << compressed_data1_res.error();
-        const auto hash1 = calculate_blake3_hash128(data1);
+        const auto hash1 = calculate_blake3_hash256(data1);
         Chunk chunk1; chunk1.set_data({data1.begin(), data1.end()});
         chunk1.set_data(std::move(*compressed_data1_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape1, chunk1, hash1).has_value());
 
         auto compressed_data2_res = compressor.compress(data2);
         ASSERT_TRUE(compressed_data2_res.has_value()) << compressed_data2_res.error();
-        const auto hash2 = calculate_blake3_hash128(data2);
+        const auto hash2 = calculate_blake3_hash256(data2);
         Chunk chunk2; chunk2.set_data({data2.begin(), data2.end()});
         chunk2.set_data(std::move(*compressed_data2_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape2, chunk2, hash2).has_value());
 
         auto compressed_data3_res = compressor.compress(data3);
         ASSERT_TRUE(compressed_data3_res.has_value()) << compressed_data3_res.error();
-        const auto hash3 = calculate_blake3_hash128(data3);
+        const auto hash3 = calculate_blake3_hash256(data3);
         Chunk chunk3; chunk3.set_data({data3.begin(), data3.end()});
         chunk3.set_data(std::move(*compressed_data3_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape3, chunk3, hash3).has_value());
 
         auto compressed_data4_res = compressor.compress(data4);
         ASSERT_TRUE(compressed_data4_res.has_value()) << compressed_data4_res.error();
-        const auto hash4 = calculate_blake3_hash128(data4);
+        const auto hash4 = calculate_blake3_hash256(data4);
         Chunk chunk4; chunk4.set_data({data4.begin(), data4.end()});
         chunk4.set_data(std::move(*compressed_data4_res));
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::ZSTD_COMPRESSED, DType::UINT8, ChunkFlags::ZSTD, shape4, chunk4, hash4).has_value());
@@ -494,11 +494,11 @@ TEST_F(CddFileTest, InMemoryWriterToReader) {
         ASSERT_TRUE(writer_result.has_value()) << writer_result.error();
         auto writer = std::move(*writer_result);
 
-        const auto hash1 = calculate_blake3_hash128(data1);
+        const auto hash1 = calculate_blake3_hash256(data1);
         Chunk chunk1; chunk1.set_data({data1.begin(), data1.end()});
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, chunk1, hash1).has_value());
 
-        const auto hash2 = calculate_blake3_hash128(data2);
+        const auto hash2 = calculate_blake3_hash256(data2);
         Chunk chunk2; chunk2.set_data({data2.begin(), data2.end()});
         ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, chunk2, hash2).has_value());
         
@@ -562,7 +562,7 @@ TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
                 original_data_chunks.push_back(data);
                 vector<int64_t> shape = {static_cast<int64_t>(data.size())};
                 
-                const auto raw_data_hash = calculate_blake3_hash128(data);
+                const auto raw_data_hash = calculate_blake3_hash256(data);
                 Chunk temp_chunk;
                 temp_chunk.set_data({data.begin(), data.end()});
                 ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, temp_chunk, raw_data_hash).has_value());
@@ -598,7 +598,7 @@ TEST_P(CddChunkOffsetChainingTest, HandlesDynamicBlockAllocation) {
                 original_data_chunks.push_back(data);
                 vector<int64_t> shape = {static_cast<int64_t>(data.size())};
 
-                const auto raw_data_hash = calculate_blake3_hash128(data);
+                const auto raw_data_hash = calculate_blake3_hash256(data);
                 Chunk temp_chunk;
                 temp_chunk.set_data({data.begin(), data.end()});
                 ASSERT_TRUE(writer->append_chunk(ChunkDataType::RAW, DType::UINT8, ChunkFlags::NONE, shape, temp_chunk, raw_data_hash).has_value());
