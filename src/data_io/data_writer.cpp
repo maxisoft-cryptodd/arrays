@@ -28,9 +28,9 @@ std::expected<void, std::string> DataWriter::write_new_chunk_offsets_block(uint6
 
     Blake3StreamHasher initial_hasher;
     initial_hasher.update(std::span(new_block.offsets_and_pointer()));
-    new_block.set_hash(initial_hasher.finalize_128());
+    new_block.set_hash(initial_hasher.finalize_256());
 
-    new_block.set_size(sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash128_t) +
+    new_block.set_size(sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash256_t) +
                        sizeof(uint32_t) +
                        (new_block.offsets_and_pointer().size() * sizeof(uint64_t)));
 
@@ -62,7 +62,7 @@ std::expected<void, std::string> DataWriter::update_previous_chunk_offsets_block
 
     Blake3StreamHasher recalculator;
     recalculator.update(std::span(prev_block.offsets_and_pointer()));
-    prev_block.set_hash(recalculator.finalize_128());
+    prev_block.set_hash(recalculator.finalize_256());
 
     const uint64_t hash_offset_in_block = previous_block_offset + sizeof(uint32_t) + sizeof(uint16_t);
     if (auto res = serialization::write_pod_at(*backend_, hash_offset_in_block, prev_block.hash()); !res) {
@@ -239,7 +239,7 @@ namespace {
 std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
                                                           std::span<const int64_t> shape,
                                                           Chunk& source_chunk,
-                                                          blake3_hash128_t raw_data_hash) {
+                                                          blake3_hash256_t raw_data_hash) {
     if (shape.size() > MAX_SHAPE_DIMENSIONS) {
         return std::unexpected("Shape has an excessive number of dimensions.");
     }
@@ -284,7 +284,7 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
         sizeof(uint32_t) + // size
         sizeof(uint16_t) + // type
         sizeof(uint16_t) + // dtype
-        sizeof(blake3_hash128_t) + // hash
+        sizeof(blake3_hash256_t) + // hash
         sizeof(uint64_t) + // flags
         sizeof(uint32_t) + (chunk.shape().size() * sizeof(int64_t)) + // shape
         sizeof(uint32_t) + chunk.data().size(); // data
@@ -315,9 +315,9 @@ std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, 
 
     Blake3StreamHasher recalculator;
     recalculator.update(std::span(current_block.offsets_and_pointer()));
-    current_block.set_hash(recalculator.finalize_128());
+    current_block.set_hash(recalculator.finalize_256());
 
-    const uint64_t offset_in_block = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash128_t) +
+    const uint64_t offset_in_block = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash256_t) +
                                      sizeof(uint32_t) + (current_chunk_offset_block_index_ * sizeof(uint64_t));
     if (auto res = serialization::write_pod_at(*backend_, current_chunk_offset_block_start_ + offset_in_block,
                                                  chunk_start_offset); !res)

@@ -115,7 +115,7 @@ std::expected<LoadChunksResponse, ExpectedError> LoadChunksHandler::execute_type
         auto decoded_span = (*buffer_result)->as_bytes();
         if (request.check_checksums)
         {
-            const auto hash = calculate_blake3_hash128(decoded_span);
+            const auto hash = calculate_blake3_hash256(decoded_span);
             if (hash != chunk->hash())
             {
                 return std::unexpected(ExpectedError("Checksum mismatch for chunk at offset " + std::to_string(current_offset) + "."));

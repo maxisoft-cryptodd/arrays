@@ -76,7 +76,7 @@ std::expected<void, std::string> ChunkOffsetsBlock::read(IStorageBackend& backen
     if (!type_res) return std::unexpected(type_res.error());
     type_ = static_cast<ChunkOffsetType>(*type_res);
 
-    auto hash_res = read_pod<blake3_hash128_t>(backend);
+    auto hash_res = read_pod<blake3_hash256_t>(backend);
     if (!hash_res) return std::unexpected(hash_res.error());
     hash_ = *hash_res;
 
@@ -139,7 +139,7 @@ std::expected<void, std::string> Chunk::read(IStorageBackend& backend) {
     if (auto res = read_pod<uint32_t>(backend); res) size_ = *res; else return std::unexpected(res.error());
     if (auto res = read_pod<uint16_t>(backend); res) type_ = static_cast<ChunkDataType>(*res); else return std::unexpected(res.error());
     if (auto res = read_pod<uint16_t>(backend); res) dtype_ = static_cast<DType>(*res); else return std::unexpected(res.error());
-    if (auto res = read_pod<blake3_hash128_t>(backend); res) hash_ = *res; else return std::unexpected(res.error());
+    if (auto res = read_pod<blake3_hash256_t>(backend); res) hash_ = *res; else return std::unexpected(res.error());
     if (auto res = read_pod<uint64_t>(backend); res) flags_ = *res; else return std::unexpected(res.error());
     if (auto res = read_vector_pod<int64_t>(backend); res) shape_ = std::move(*res); else return std::unexpected(res.error());
     if (auto res = read_blob(backend); res) data_ = std::move(*res); else return std::unexpected(res.error());

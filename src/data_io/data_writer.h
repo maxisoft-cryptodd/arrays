@@ -92,7 +92,7 @@ public:
      */
     std::expected<size_t, std::string> append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
                                                   std::span<const int64_t> shape, Chunk& source_chunk,
-                                                  blake3_hash128_t raw_data_hash);
+                                                  blake3_hash256_t raw_data_hash);
 
     /**
      * @brief Updates the user metadata in the file header.

@@ -79,7 +79,7 @@ DataReader::DataReader(Create, std::unique_ptr<IStorageBackend>&& backend) : bac
             // Verify the integrity of the index block itself
             Blake3StreamHasher block_hasher;
             block_hasher.update(std::span(block.offsets_and_pointer()));
-            if (block_hasher.finalize_128() != block.hash()) {
+            if (block_hasher.finalize_256() != block.hash()) {
                 return std::unexpected("ChunkOffsetsBlock integrity check failed. The file index may be corrupt.");
             }
 

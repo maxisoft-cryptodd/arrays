@@ -45,7 +45,7 @@ std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
     std::expected<size_t, std::string> append_result;
     size_t compressed_size = 0;
     size_t original_size = chunk_input_data.size();
-    const blake3_hash128_t raw_data_hash = calculate_blake3_hash128(chunk_input_data);
+    const blake3_hash256_t raw_data_hash = calculate_blake3_hash256(chunk_input_data);
 
     if (codec != cryptodd::ChunkDataType::RAW) {
         std::remove_reference_t<decltype(compressor)>::ChunkResult chunk_result;

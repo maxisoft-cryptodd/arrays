@@ -150,8 +150,8 @@ public:
     [[nodiscard]] ChunkOffsetType type() const { return type_; }
     void set_type(ChunkOffsetType type) { type_ = type; }
 
-    [[nodiscard]] const blake3_hash128_t& hash() const { return hash_; }
-    void set_hash(const blake3_hash128_t& hash) { hash_ = hash; }
+    [[nodiscard]] const blake3_hash256_t& hash() const { return hash_; }
+    void set_hash(const blake3_hash256_t& hash) { hash_ = hash; }
 
     [[nodiscard]] const memory::vector<uint64_t>& offsets_and_pointer() const { return offsets_and_pointer_; }
     void set_offsets_and_pointer(memory::vector<uint64_t> offsets) { offsets_and_pointer_ = std::move(offsets); }
@@ -162,7 +162,7 @@ public:
 private:
     uint32_t size_{};
     ChunkOffsetType type_{};
-    blake3_hash128_t hash_{};
+    blake3_hash256_t hash_{};
     memory::vector<uint64_t> offsets_and_pointer_;
 };
 
@@ -188,7 +188,7 @@ public:
     [[nodiscard]] uint32_t size() const { return size_; }
     [[nodiscard]] ChunkDataType type() const { return type_; }
     [[nodiscard]] DType dtype() const { return dtype_; }
-    [[nodiscard]] const blake3_hash128_t& hash() const { return hash_; }
+    [[nodiscard]] const blake3_hash256_t& hash() const { return hash_; }
     [[nodiscard]] uint64_t flags() const { return flags_; }
     [[nodiscard]] const memory::vector<int64_t>& shape() const { return shape_; }
     [[nodiscard]] const memory::vector<std::byte>& data() const { return data_; }
@@ -201,7 +201,7 @@ public:
     void set_size(uint32_t size) { size_ = size; }
     void set_type(ChunkDataType type) { type_ = type; }
     void set_dtype(DType dtype) { dtype_ = dtype; }
-    void set_hash(const blake3_hash128_t& hash) { hash_ = hash; }
+    void set_hash(const blake3_hash256_t& hash) { hash_ = hash; }
     void set_flags(uint64_t flags) { flags_ = flags; }
     void set_shape(memory::vector<int64_t> shape) { shape_ = std::move(shape); }
     /** @brief Sets the chunk's data, taking ownership of the provided vector. */
@@ -214,7 +214,7 @@ private:
     uint32_t size_{};
     ChunkDataType type_{};
     DType dtype_{};
-    blake3_hash128_t hash_{};
+    blake3_hash256_t hash_{};
     uint64_t flags_{};
     memory::vector<int64_t> shape_;
     memory::vector<std::byte> data_;

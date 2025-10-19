@@ -445,7 +445,7 @@ TEST_F(CApiTest, LoadChunksChecksumVerification) {
             sizeof(uint32_t) + // chunk size
             sizeof(uint16_t) + // type
             sizeof(uint16_t) + // dtype
-            sizeof(cryptodd::blake3_hash128_t) + // hash
+            sizeof(cryptodd::blake3_hash256_t) + // hash
             sizeof(uint64_t) + // flags
             sizeof(uint32_t) + (chunk_res->shape().size() * sizeof(int64_t)) + // shape
             sizeof(uint32_t);  // data size
