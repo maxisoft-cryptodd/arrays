@@ -109,14 +109,23 @@ std::expected<LoadChunksResponse, ExpectedError> LoadChunksHandler::execute_type
 
     size_t current_offset = 0;
     for (auto& chunk : chunks) {
+        const auto check_hash = request.check_checksums.value_or((chunk->flags() & cryptodd::ChunkFlags::SKIP_HASH_CHECK) == 0);
+        std::optional<blake3_hash256_t> hash = std::nullopt;
+        if (check_hash && chunk->flags() & cryptodd::ChunkFlags::RECONSTRUCTION_NOT_PERFECT)
+        {
+            hash = calculate_blake3_hash256(chunk->data());
+        }
         auto buffer_result = extractor.read_chunk(*chunk);
         if (!buffer_result) return std::unexpected(ExpectedError(buffer_result.error().to_string()));
         
         auto decoded_span = (*buffer_result)->as_bytes();
-        if (request.check_checksums)
+        if (check_hash)
         {
-            const auto hash = calculate_blake3_hash256(decoded_span);
-            if (hash != chunk->hash())
+            if (!hash)
+            {
+                hash = calculate_blake3_hash256(decoded_span);
+            }
+            if (hash.value() != chunk->hash())
             {
                 return std::unexpected(ExpectedError("Checksum mismatch for chunk at offset " + std::to_string(current_offset) + "."));
             }

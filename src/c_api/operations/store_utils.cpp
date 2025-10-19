@@ -13,6 +13,24 @@
 
 namespace cryptodd::ffi::StoreUtils {
 
+    namespace
+    {
+        constexpr bool is_perfect_reconstructible(const ChunkDataType datatype)
+        {
+            switch (datatype)
+            {
+            case ChunkDataType::BINANCE_OB_SIMD_F16_AS_F32:
+            case ChunkDataType::OKX_OB_SIMD_F16_AS_F32:
+            case ChunkDataType::GENERIC_OB_SIMD_F16_AS_F32:
+            case ChunkDataType::TEMPORAL_1D_SIMD_F16_XOR_SHUFFLE_AS_F32:
+            case ChunkDataType::TEMPORAL_2D_SIMD_F16_AS_F32:
+                return false;
+            default:
+                return true;
+            }
+        }
+    }
+
 std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
     CddContext& context,
     cryptodd::DataWriter& writer,
@@ -37,6 +55,13 @@ std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
             flags |= cryptodd::ChunkFlags::BIG_ENDIAN;
         }
     }
+    auto direct_hash = is_perfect_reconstructible(codec);
+    if (!direct_hash)
+    {
+        flags |= cryptodd::ChunkFlags::RECONSTRUCTION_NOT_PERFECT;
+    }
+
+    direct_hash = (flags & cryptodd::ChunkFlags::RECONSTRUCTION_NOT_PERFECT) == 0;
 
     const int zstd_level = encoding_spec.zstd_level.value_or(cryptodd::ZstdCompressor::DEFAULT_COMPRESSION_LEVEL);
 
@@ -45,7 +70,7 @@ std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
     std::expected<size_t, std::string> append_result;
     size_t compressed_size = 0;
     size_t original_size = chunk_input_data.size();
-    const blake3_hash256_t raw_data_hash = calculate_blake3_hash256(chunk_input_data);
+    blake3_hash256_t raw_data_hash = direct_hash ? calculate_blake3_hash256(chunk_input_data) : blake3_hash256_t{};
 
     if (codec != cryptodd::ChunkDataType::RAW) {
         std::remove_reference_t<decltype(compressor)>::ChunkResult chunk_result;
@@ -102,15 +127,23 @@ std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
                 return std::unexpected(ExpectedError("The specified codec is not RAW and not a supported compression type for writing."));
         }
         if (!chunk_result) return std::unexpected(ExpectedError(chunk_result.error().to_string()));
-        
+
         auto& chunk = *chunk_result->get();
         compressed_size = chunk.data().size(); // Get size BEFORE data is moved inside append_chunk.
+        if (!direct_hash)
+        {
+            raw_data_hash = calculate_blake3_hash256(chunk.data());
+        }
         append_result = writer.append_chunk(chunk.type(), chunk.dtype(), flags, chunk.get_shape(), chunk, raw_data_hash);
     } else {
         // For raw data, a temporary chunk must be created to hold the data for the writer.
         Chunk temp_chunk;
         temp_chunk.set_data({chunk_input_data.begin(), chunk_input_data.end()});
         compressed_size = chunk_input_data.size();
+        if (!direct_hash)
+        {
+            raw_data_hash = calculate_blake3_hash256(temp_chunk.data());
+        }
         append_result = writer.append_chunk(codec, data_spec.dtype, flags, data_spec.shape, temp_chunk, raw_data_hash);
     }
 
