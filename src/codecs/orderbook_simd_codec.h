@@ -263,7 +263,7 @@ inline std::expected<Float32AlignedVector, std::string> DynamicOrderbookSimdCode
         return std::unexpected("Decompressed data size does not match expected size for the given number of snapshots.");
     }
 
-    Float32AlignedVector final_output(num_floats + HWY_ALIGNMENT);
+    Float32AlignedVector final_output(num_floats);
     static_assert(sizeof(std::byte) == sizeof(uint8_t));
     simd::UnshuffleAndReconstruct_dispatcher(reinterpret_cast<const uint8_t*>(shuffled_f16_bytes_result->data()), // NOLINT
                                        final_output.data(), num_snapshots, snapshot_floats_, prev_snapshot);
