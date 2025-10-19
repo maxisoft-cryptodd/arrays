@@ -74,6 +74,8 @@ enum ChunkFlags : uint64_t {
     DOWN_CAST_32 = 1 << 6,
     DOWN_CAST_64 = 1 << 7,
     DOWN_CAST_128 = 1 << 8,
+    RECONSTRUCTION_NOT_PERFECT = 1 << 9,
+    SKIP_HASH_CHECK = 1 << 10,
     RESERVED = 1ULL << 63
 };
 
