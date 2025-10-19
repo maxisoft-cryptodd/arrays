@@ -37,6 +37,8 @@ private:
                                                                                   uint64_t new_block_offset);
 
 public:
+    static constexpr size_t DEFAULT_CHUNK_OFFSETS_BLOCK_CAPACITY = 1024;
+
     /**
      * @brief Private construction key.
      * This prevents direct construction of DataWriter, forcing use of static factory methods.
@@ -61,7 +63,7 @@ public:
      * @return A unique_ptr to the DataWriter on success, or an error string.
      */
     static std::expected<std::unique_ptr<DataWriter>, std::string> create_new(const std::filesystem::path& filepath,
-                                                                              size_t chunk_offsets_block_capacity = 1024,
+                                                                              size_t chunk_offsets_block_capacity = DEFAULT_CHUNK_OFFSETS_BLOCK_CAPACITY,
                                                                               std::span<const std::byte> user_metadata = {});
 
     /**
@@ -77,7 +79,7 @@ public:
      * @param user_metadata Optional user-defined metadata to store in the file header.
      * @return A unique_ptr to the DataWriter on success, or an error string.
      */
-    static std::expected<std::unique_ptr<DataWriter>, std::string> create_in_memory(size_t chunk_offsets_block_capacity = 1024,
+    static std::expected<std::unique_ptr<DataWriter>, std::string> create_in_memory(size_t chunk_offsets_block_capacity = DEFAULT_CHUNK_OFFSETS_BLOCK_CAPACITY,
                                                                                     std::span<const std::byte> user_metadata = {});
 
     /**

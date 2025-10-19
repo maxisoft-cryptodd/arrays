@@ -11,6 +11,8 @@ namespace cryptodd::ffi {
 struct StoreChunkRequest; struct StoreArrayRequest; struct LoadChunksRequest;
 struct InspectRequest; struct GetUserMetadataRequest; struct SetUserMetadataRequest;
 struct FlushRequest; struct PingRequest;
+struct WriterOptions;
+struct BackendConfig; struct ContextConfig;
 
 struct StoreChunkResponse; struct StoreArrayResponse; struct LoadChunksResponse;
 struct InspectResponse; struct GetUserMetadataResponse; struct SetUserMetadataResponse;

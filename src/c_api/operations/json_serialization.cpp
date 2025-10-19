@@ -123,6 +123,46 @@ void to_json(nlohmann::json& j, const FlushResponse& res) { to_json_base(j, res)
 void from_json(const nlohmann::json& j, PingRequest& req) { from_json_base(j, req); }
 void to_json(nlohmann::json& j, const PingResponse& res) { to_json_base(j, res); j["message"] = res.message; j["metadata"] = res.metadata; }
 
+void from_json(const nlohmann::json& j, WriterOptions& opts) {
+    opts.chunk_offsets_block_capacity = j.value<std::optional<size_t>>("chunk_offsets_block_capacity", std::nullopt);
+    opts.user_metadata_base64 = j.value<std::optional<std::string>>("user_metadata_base64", std::nullopt);
+}
+
+void to_json(nlohmann::json& j, const WriterOptions& opts) {
+    if (opts.chunk_offsets_block_capacity) {
+        j["chunk_offsets_block_capacity"] = *opts.chunk_offsets_block_capacity;
+    }
+    if (opts.user_metadata_base64) {
+        j["user_metadata_base64"] = *opts.user_metadata_base64;
+    }
+}
+
+void from_json(const nlohmann::json& j, BackendConfig& config) {
+    config.type = get_required<std::string>(j, "type");
+    config.mode = get_required<std::string>(j, "mode");
+    config.path = j.value<std::optional<std::string>>("path", std::nullopt);
+}
+
+void to_json(nlohmann::json& j, const BackendConfig& config) {
+    j["type"] = config.type;
+    j["mode"] = config.mode;
+    if (config.path) {
+        j["path"] = *config.path;
+    }
+}
+
+void from_json(const nlohmann::json& j, ContextConfig& config) {
+    config.backend = get_required<BackendConfig>(j, "backend");
+    config.writer_options = j.value<std::optional<WriterOptions>>("writer_options", std::nullopt);
+}
+
+void to_json(nlohmann::json& j, const ContextConfig& config) {
+    j["backend"] = config.backend;
+    if (config.writer_options) {
+        j["writer_options"] = *config.writer_options;
+    }
+}
+
 // --- Custom logic for std::variant types ---
 void from_json(const nlohmann::json& j, ChunkingStrategy& s) {
     const auto strategy_type = get_required<std::string>(j, "strategy");
@@ -181,6 +221,9 @@ INSTANTIATE_FROM_JSON(StoreChunkRequest) INSTANTIATE_FROM_JSON(StoreArrayRequest
 INSTANTIATE_FROM_JSON(LoadChunksRequest) INSTANTIATE_FROM_JSON(InspectRequest)
 INSTANTIATE_FROM_JSON(GetUserMetadataRequest) INSTANTIATE_FROM_JSON(SetUserMetadataRequest)
 INSTANTIATE_FROM_JSON(FlushRequest) INSTANTIATE_FROM_JSON(PingRequest)
+INSTANTIATE_FROM_JSON(WriterOptions)
+INSTANTIATE_FROM_JSON(BackendConfig)
+INSTANTIATE_FROM_JSON(ContextConfig)
 #undef INSTANTIATE_FROM_JSON
 
 template<typename T>
@@ -194,6 +237,9 @@ INSTANTIATE_TO_JSON(StoreChunkResponse) INSTANTIATE_TO_JSON(StoreArrayResponse)
 INSTANTIATE_TO_JSON(LoadChunksResponse) INSTANTIATE_TO_JSON(InspectResponse)
 INSTANTIATE_TO_JSON(GetUserMetadataResponse) INSTANTIATE_TO_JSON(SetUserMetadataResponse)
 INSTANTIATE_TO_JSON(FlushResponse) INSTANTIATE_TO_JSON(PingResponse)
+INSTANTIATE_TO_JSON(WriterOptions)
+INSTANTIATE_TO_JSON(BackendConfig)
+INSTANTIATE_TO_JSON(ContextConfig)
 #undef INSTANTIATE_TO_JSON
 
 } // namespace cryptodd::ffi
