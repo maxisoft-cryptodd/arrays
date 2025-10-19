@@ -162,4 +162,20 @@ struct PingResponse : OperationResponseBase {
     OperationMetadata metadata{};
 };
 
+struct WriterOptions {
+    std::optional<size_t> chunk_offsets_block_capacity;
+    std::optional<std::string> user_metadata_base64;
+};
+
+struct BackendConfig {
+    std::string type;
+    std::string mode;
+    std::optional<std::string> path;
+};
+
+struct ContextConfig {
+    BackendConfig backend;
+    std::optional<WriterOptions> writer_options;
+};
+
 } // namespace cryptodd::ffi

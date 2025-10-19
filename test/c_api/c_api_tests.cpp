@@ -519,3 +519,138 @@ TEST_F(CApiTest, SetMetadataAfterWriteFails) {
     json error_response = json::parse(response_buffer_.data());
     ASSERT_TRUE(std::string_view(error_response["error"]["message"].get<std::string>()).find("metadata can only be set on a new, empty file") != std::string::npos);
 }
+
+
+TEST_F(CApiTest, ContextCreationWithOptions) {
+    // NOTE: The first two sub-tests use a file backend because they follow a write-then-read pattern
+    // to verify persistence. A memory backend's data is lost when the writer context is destroyed,
+    // making it unsuitable for this verification pattern through the C-API.
+
+    // Test creating a context with user metadata specified in the config
+    {
+        test_filepath_ = generate_unique_test_filepath();
+        const std::string user_meta_str = "Initial Metadata From Config";
+        const std::string user_meta_b64 = cryptodd::ffi::base64::encode(std::as_bytes(std::span(user_meta_str)));
+
+        json config = {
+            {"backend", {
+                {"type", "File"},
+                {"mode", "WriteTruncate"},
+                {"path", test_filepath_.string()}
+            }},
+            {"writer_options", {
+                {"user_metadata_base64", user_meta_b64}
+            }}
+        };
+
+        cdd_handle_t writer_handle = create_context(config);
+        ASSERT_GT(writer_handle, 0);
+
+        // Close the writer context to flush everything to disk
+        if (auto& h = handles_to_cleanup_.back(); h && *h == writer_handle) {
+            handles_to_cleanup_.pop_back();
+        }
+
+        // Open in read mode to inspect
+        json read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", test_filepath_.string()}}}};
+        cdd_handle_t reader_handle = create_context(read_config);
+        ASSERT_GT(reader_handle, 0);
+
+        auto inspect_res = execute_op(reader_handle, {{"op_type", "Inspect"}});
+        ASSERT_FALSE(inspect_res.is_null());
+        ASSERT_EQ(inspect_res["total_chunks"], 0);
+        ASSERT_EQ(inspect_res["file_header"]["user_metadata_base64"], user_meta_b64);
+    }
+
+    // Test creating a context with a custom chunk offset block capacity, writing many chunks, and verifying data.
+    {
+        test_filepath_ = generate_unique_test_filepath();
+        const size_t num_chunks = 100;
+        const size_t chunk_size = 10;
+        const size_t block_capacity = 2; // Very small capacity to force many rollovers
+        std::vector<std::vector<std::byte>> original_chunks;
+        original_chunks.reserve(num_chunks);
+
+        // Write Phase
+        {
+            json config = {
+                {"backend", {
+                    {"type", "File"},
+                    {"mode", "WriteTruncate"},
+                    {"path", test_filepath_.string()}
+                }},
+                {"writer_options", {
+                    {"chunk_offsets_block_capacity", block_capacity}
+                }}
+            };
+
+            cdd_handle_t writer_handle = create_context(config);
+            ASSERT_GT(writer_handle, 0);
+
+            // Write chunks, each with unique data
+            for (size_t i = 0; i < num_chunks; ++i) {
+                std::vector<std::byte> data(chunk_size);
+                for (size_t j = 0; j < chunk_size; ++j) {
+                    data[j] = static_cast<std::byte>((i + j) % 256); // Unique data based on chunk index and position
+                }
+                original_chunks.push_back(data);
+
+                execute_op(writer_handle, {{"op_type", "StoreChunk"}, {"data_spec", {{"dtype", "UINT8"}, {"shape", {chunk_size}}}}, {"encoding", {{"codec", "ZSTD_COMPRESSED"}, {"zstd_level", -2}}}}, data);
+            }
+
+            if (auto& h = handles_to_cleanup_.back(); h && *h == writer_handle) {
+                handles_to_cleanup_.pop_back();
+            }
+        }
+
+        // Read and Verify Phase
+        {
+            json read_config = {{"backend", {{"type", "File"}, {"mode", "Read"}, {"path", test_filepath_.string()}}}};
+            cdd_handle_t reader_handle = create_context(read_config);
+            ASSERT_GT(reader_handle, 0);
+
+            // First, inspect to confirm the total number of chunks is correct
+            auto inspect_res = execute_op(reader_handle, {{"op_type", "Inspect"}});
+            ASSERT_FALSE(inspect_res.is_null());
+            ASSERT_EQ(inspect_res["total_chunks"], num_chunks);
+
+            // Now, load all chunks and verify their content
+            const size_t total_data_size = num_chunks * chunk_size;
+            std::vector<std::byte> read_buffer(total_data_size);
+            json load_req = {{"op_type", "LoadChunks"}, {"selection", {{"type", "All"}}}};
+            auto load_res = execute_op(reader_handle, load_req, {}, read_buffer);
+
+            ASSERT_FALSE(load_res.is_null());
+            ASSERT_EQ(load_res["bytes_written_to_output"], total_data_size);
+
+            // Compare each chunk's data with the original
+            for (size_t i = 0; i < num_chunks; ++i) {
+                const size_t offset = i * chunk_size;
+                std::span<const std::byte> loaded_chunk_data(read_buffer.data() + offset, chunk_size);
+                ASSERT_EQ(0, std::memcmp(loaded_chunk_data.data(), original_chunks[i].data(), chunk_size))
+                    << "Data mismatch for chunk " << i;
+            }
+        }
+    }
+
+    // Test creating a context with invalid base64 metadata (can use memory backend as no persistence is needed)
+    {
+        json config = {
+            {"backend", {
+                {"type", "Memory"}, // Using Memory backend is faster and sufficient here
+                {"mode", "WriteTruncate"}
+            }},
+            {"writer_options", {
+                {"user_metadata_base64", "this-is-not-valid-base64!!"}
+            }}
+        };
+
+        std::string config_str = config.dump();
+        // We call the C function directly because the `create_context` helper would fail the test on non-positive handles.
+        cdd_handle_t handle = cdd_context_create(config_str.c_str(), config_str.length());
+
+        // CddContext::create fails due to the base64 decoding error. The C-API wrapper `cdd_context_create`
+        // translates this internal failure into CDD_ERROR_RESOURCE_UNAVAILABLE.
+        ASSERT_EQ(handle, CDD_ERROR_RESOURCE_UNAVAILABLE);
+    }
+}
