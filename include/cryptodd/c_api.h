@@ -3,8 +3,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "cryptodd_arrays_lib_export.h"
+#ifdef SHARED_LIBRARY_BUILD
+#include "cryptodd_arrays_shared_export.h"
+#endif
 
-#ifdef CRYPTODD_ARRAYS_LIB_EXPORT
+#ifdef CRYPTODD_ARRAYS_SHARED_EXPORT
+#define CRYPTODD_API CRYPTODD_ARRAYS_SHARED_EXPORT
+#elifdef  CRYPTODD_ARRAYS_LIB_EXPORT
 #define CRYPTODD_API CRYPTODD_ARRAYS_LIB_EXPORT
 #else
 #ifdef _WIN32

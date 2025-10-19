@@ -1,7 +1,6 @@
 #include <functional>
 #include <iostream>
 #include <string>
-#include <unordered_map>
 #include <nlohmann/json.hpp>
 
 #include "cdd_context.h"
@@ -20,6 +19,11 @@
 #include "operations/ping_handler.h"
 
 namespace cryptodd::ffi {
+
+    namespace
+    {
+        std::unique_ptr<IOperationHandler> create_operation_handler(const std::string& op_type);
+    }
 
 CddContext::CddContext(
     ProtectedMarker,
@@ -150,33 +154,64 @@ std::expected<nlohmann::json, ExpectedError> CddContext::execute_operation(
         return std::unexpected(ExpectedError("Concurrent operation detected on the same context handle. Contexts are not thread-safe."));
     }
 
-    // Using a static dispatch map is more efficient and scalable than an if-else chain.
-    using HandlerFactory = std::function<std::unique_ptr<IOperationHandler>()>;
-    static const std::unordered_map<std::string, HandlerFactory> op_handlers = {
-        {"StoreChunk",      []() { return std::make_unique<StoreChunkHandler>(); }},
-        {"StoreArray",      []() { return std::make_unique<StoreArrayHandler>(); }},
-        {"Inspect",         []() { return std::make_unique<InspectHandler>(); }},
-        {"LoadChunks",      []() { return std::make_unique<LoadChunksHandler>(); }},
-        {"GetUserMetadata", []() { return std::make_unique<GetUserMetadataHandler>(); }},
-        {"SetUserMetadata", []() { return std::make_unique<SetUserMetadataHandler>(); }},
-        {"Flush",           []() { return std::make_unique<FlushHandler>(); }},
-        {"Ping",            []() { return std::make_unique<PingHandler>(); }}
-    };
-
     try {
         const std::string op_type = op_request.at("op_type").get<std::string>();
 
-        auto it = op_handlers.find(op_type);
-        if (it == op_handlers.end()) {
+        auto handler = create_operation_handler(op_type);
+        if (!handler) {
+            // Note: A hash collision would manifest here as a false positive, but it's
+            // extremely unlikely with FNV-1a and typical operation names.
+            // For absolute certainty, one could double-check the string if a match is found.
             return std::unexpected(ExpectedError("Unknown or unsupported op_type: " + op_type));
         }
 
-        auto handler = it->second();
         return handler->execute(*this, op_request, input_data, output_data);
 
     } catch(const nlohmann::json::exception& e) {
         return std::unexpected(ExpectedError(std::string("JSON request error: ") + e.what()));
     }
 }
+
+    namespace
+    {
+        constexpr size_t cx_hash(const char* input) {
+            // ReSharper disable CppDFAUnreachableCode
+            size_t hash = sizeof(size_t) == 8 ? 0xcbf29ce484222325 : 0x811c9dc5;
+            constexpr size_t prime = sizeof(size_t) == 8 ? 0x00000100000001b3 : 0x01000193;
+            // ReSharper restore CppDFAUnreachableCode
+            while (*input) {
+                hash ^= static_cast<size_t>(*input);
+                hash *= prime;
+                ++input;
+            }
+
+            return hash;
+        }
+
+        // Creates an appropriate operation handler based on the op_type string
+        // using a compile-time hash and a switch statement for efficient dispatch.
+        // Returns a nullptr if the op_type is unknown.
+        std::unique_ptr<IOperationHandler> create_operation_handler(const std::string& op_type) {
+            // Macro to generate a case statement for creating an operation handler.
+            // It takes the operation name (e.g., StoreChunk) and creates the case for
+            // its hash, returning a unique_ptr to the corresponding handler (e.g., StoreChunkHandler).
+#define CDD_CREATE_HANDLER_CASE(OpName) \
+case cx_hash(#OpName): return std::make_unique<OpName##Handler>()
+
+            switch (cx_hash(op_type.c_str())) {
+                CDD_CREATE_HANDLER_CASE(StoreChunk);
+                CDD_CREATE_HANDLER_CASE(StoreArray);
+                CDD_CREATE_HANDLER_CASE(Inspect);
+                CDD_CREATE_HANDLER_CASE(LoadChunks);
+                CDD_CREATE_HANDLER_CASE(GetUserMetadata);
+                CDD_CREATE_HANDLER_CASE(SetUserMetadata);
+                CDD_CREATE_HANDLER_CASE(Flush);
+                CDD_CREATE_HANDLER_CASE(Ping);
+            default:
+                return {};
+            }
+#undef CDD_CREATE_HANDLER_CASE
+        }
+    }
 
 } // namespace cryptodd::ffi
