@@ -11,6 +11,7 @@
     "nlohmann-json",
     "turbobase64",
     "magic-enum",
+    "mapbox-eternal",
     {
       "name": "mimalloc",
       "features": [
@@ -30,7 +31,8 @@
   ],
   "vcpkg-configuration": {
     "overlay-ports": [
-      "./.vcpkg-overlay-ports/python3-empty"
+      "./.vcpkg-overlay-ports/python3-empty",
+      "./.vcpkg-overlay-ports/maxisoft"
     ]
   },
   "version": "0.0.1",

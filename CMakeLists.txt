@@ -129,11 +129,16 @@ target_link_libraries(cryptodd_arrays_lib
         BLAKE3::blake3
 )
 
+find_path(MAPBOX_ETERNAL_INCLUDE_DIRS "mapbox/eternal.hpp")
+target_include_directories(cryptodd_arrays_lib PRIVATE ${MAPBOX_ETERNAL_INCLUDE_DIRS})
+
 add_library(cryptodd_arrays_shared SHARED
         library.cpp
+        src/c_api/c_api.cpp
 )
 
 set_target_properties(cryptodd_arrays_shared PROPERTIES OUTPUT_NAME "cryptodd_arrays")
+target_compile_definitions(cryptodd_arrays_shared PRIVATE SHARED_LIBRARY_BUILD)
 
 target_link_libraries(cryptodd_arrays_shared PRIVATE cryptodd_arrays_lib)
 
@@ -166,8 +171,10 @@ add_executable(cryptodd_arrays_test
         test/data_io/buffer_test.cpp
         test/c_api/c_api_tests.cpp
         test/helpers/orderbook_generator.cpp
-        test/c_api/c_api_simd_tests.cpp
+        test/c_api/c_api_orderbook_simd_tests.cpp
         test/codecs/float_conversion_simd_codec_test.cpp
+        test/c_api/c_api_temporal_1d_simd_tests.cpp
+        test/c_api/c_api_temporal_2d_simd_tests.cpp
 )
 target_link_libraries(cryptodd_arrays_test PRIVATE mimalloc GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
 

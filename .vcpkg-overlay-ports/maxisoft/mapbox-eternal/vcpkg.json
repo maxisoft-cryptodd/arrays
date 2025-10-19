@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "mapbox-eternal",
+  "version": "1.0.1",
+  "description": "A header-only C++ implementation of constexpr/compile-time maps and hash maps.",
+  "homepage": "https://github.com/mapbox/eternal",
+  "license": "ISC"
+}
