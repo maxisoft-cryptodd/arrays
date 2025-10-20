@@ -36,11 +36,11 @@ namespace {
         
         if constexpr (std::endian::native == std::endian::little)
         {
-            flags |= ChunkFlags::LITTLE_ENDIAN;
+            flags |= ChunkFlags::FLAG_LITTLE_ENDIAN;
         }
         else if constexpr (std::endian::native == std::endian::big)
         {
-            flags |= ChunkFlags::BIG_ENDIAN;
+            flags |= ChunkFlags::FLAG_BIG_ENDIAN;
         }
         chunk->set_flags(flags);
         return chunk;
