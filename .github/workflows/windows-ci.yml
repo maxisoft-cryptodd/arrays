@@ -19,7 +19,7 @@ jobs:
       matrix:
         BUILD_TYPE: [RelWithDebInfo, Debug]
         USE_MIMALLOC: [on, off]
-        VCPKG_TARGET_TRIPLET: [x64-windows-static, x64-mingw-static]
+        VCPKG_TARGET_TRIPLET: [x64-windows, x64-mingw-dynamic]
     name: '${{ matrix.BUILD_TYPE }} / mimalloc: ${{ matrix.USE_MIMALLOC }} / triplet: ${{ matrix.VCPKG_TARGET_TRIPLET }}'
 
     steps:
@@ -47,11 +47,11 @@ jobs:
         run: .\vcpkg\bootstrap-vcpkg.bat
 
       - name: Add msbuild to PATH
-        if: ${{ matrix.VCPKG_TARGET_TRIPLET != 'x64-mingw-static' }}
+        if: ${{ matrix.VCPKG_TARGET_TRIPLET != 'x64-mingw' }}
         uses: microsoft/setup-msbuild@v2
 
       - name: Set up MinGW
-        if: ${{ matrix.VCPKG_TARGET_TRIPLET == 'x64-mingw-static' }}
+        if: ${{ matrix.VCPKG_TARGET_TRIPLET == 'x64-mingw' }}
         shell: pwsh
         run: |
           echo "PATH=C:\msys64\usr\bin;$Env:PATH" | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
