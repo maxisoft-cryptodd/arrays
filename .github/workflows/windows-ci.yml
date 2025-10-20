@@ -36,7 +36,7 @@ jobs:
       - name: Prepare
         run: |
           uv venv --seed
-          uv pip install cmake ninja
+          uv tool install cmake ninja
           uv run ${{github.workspace}}/build_wheel.py --prepare-only --no-cleanup --use-mimalloc=on
 
       - name: Configure CMake
