@@ -36,8 +36,10 @@ jobs:
       - name: Prepare
         run: |
           uv venv --seed
-          uv tool install cmake ninja
-          uv run ${{github.workspace}}/build_wheel.py --prepare-only --no-cleanup --use-mimalloc=on
+          uv tool install cmake
+          uv tool install ninja
+          source .venv/bin/activate
+          python ${{github.workspace}}/build_wheel.py --prepare-only --no-cleanup --use-mimalloc=on
 
       - name: Configure CMake
         # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
