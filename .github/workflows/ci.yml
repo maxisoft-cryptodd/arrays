@@ -1,0 +1,158 @@
+name: CMake Linux
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [ "main", "abi", "dev" ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # BUILD_TYPE is now defined in the job matrix
+  VCPKG_DISABLE_METRICS: true
+  POWERSHELL_TELEMETRY_OPTOUT: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        BUILD_TYPE: [Release, Debug]
+        USE_MIMALLOC: [on]
+        VCPKG_TARGET_TRIPLET: [x64-linux]
+    name: '${{ matrix.BUILD_TYPE }} / mimalloc: ${{ matrix.USE_MIMALLOC }} / triplet: ${{ matrix.VCPKG_TARGET_TRIPLET }}'
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # --- VCPKG CACHING AND SETUP (Submodule) ---
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            vcpkg/installed
+            vcpkg/buildtrees
+            vcpkg/downloads
+            vcpkg/packages
+            vcpkg_installed
+            .py-build-cmake_cache/*/vcpkg_installed
+            build/vcpkg_installed
+          # The cache key should depend on all variables that change dependencies
+          key: vcpkg-${{ runner.os }}-${{ matrix.BUILD_TYPE }}-mimalloc-${{ matrix.USE_MIMALLOC }}-triplet-${{ matrix.VCPKG_TARGET_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ matrix.BUILD_TYPE }}-mimalloc-${{ matrix.USE_MIMALLOC }}-triplet-${{ matrix.VCPKG_TARGET_TRIPLET }}-
+
+      - name: Bootstrap vcpkg
+        run: ./vcpkg/bootstrap-vcpkg.sh
+
+      - name: Install uv and set the Python version
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.CCACHE_DIR }}
+            /usr/local/bin/ccache
+          key: ccache-${{ runner.os }}-${{ matrix.BUILD_TYPE }}-mimalloc-${{ matrix.USE_MIMALLOC }}-triplet-${{ matrix.VCPKG_TARGET_TRIPLET }}-${{ hashFiles('vcpkg.json') }}${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.BUILD_TYPE }}-mimalloc-${{ matrix.USE_MIMALLOC }}-triplet-${{ matrix.VCPKG_TARGET_TRIPLET }}-
+
+      - name: Install ccache
+        shell: pwsh
+        run: |
+          # Check if ccache command exists. -ErrorAction SilentlyContinue prevents an error if it's not found.
+          if (Get-Command ccache -ErrorAction SilentlyContinue) {
+            echo "ccache is already installed at: $((Get-Command ccache).Source)"
+            echo "Skipping installation."
+          }
+          else {
+            echo "ccache not found. Proceeding with installation."
+          
+            # Stop the script if any of these commands fail
+            $ErrorActionPreference = 'Stop'
+          
+            # Define variables
+            $url = "https://github.com/ccache/ccache/releases/download/v4.12.1/ccache-4.12.1-linux-x86_64.tar.xz"
+            $archive = "ccache.tar.xz"
+            $dir = "ccache-4.12.1-linux-x86_64"
+          
+            echo "Downloading ccache..."
+            Invoke-WebRequest -Uri $url -OutFile $archive
+          
+            echo "Extracting ccache..."
+            tar -xf $archive
+          
+            echo "Installing ccache to /usr/local/bin..."
+            # The 'install' command copies the file and sets executable permissions (755) in one step.
+            sudo install -m 755 "$dir/ccache" /usr/local/bin/ccache
+          
+            echo "Installation complete. Cleaning up..."
+            Remove-Item $archive, $dir -Recurse -Force
+          }
+          ccache --version
+
+
+      - name: Prepare
+        shell: pwsh
+        run: |
+          uv venv --seed
+          uv tool install cmake
+          uv tool install ninja
+          . ./.venv/bin/activate.ps1
+          python ${{github.workspace}}/build_wheel.py --use-mimalloc ${{ matrix.USE_MIMALLOC }} --prepare-only --no-cleanup --skip-git-checks
+
+      - name: Configure CMake
+        # Pass the BUILD_TYPE from the matrix and the USE_MIMALLOC option
+        # Note: -DUSE_MIMALLOC is technically redundant here because build_wheel.py updates pyproject.toml and CMakeLists.txt
+        # to handle this, but keeping it as an explicit parameter is harmless.
+        run: cmake -B ${{github.workspace}}/build -DVCPKG_TARGET_TRIPLET=${{ matrix.VCPKG_TARGET_TRIPLET }} -DCMAKE_BUILD_TYPE=${{matrix.BUILD_TYPE}} -DUSE_MIMALLOC=${{ matrix.USE_MIMALLOC }} -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake -DMI_SECURE=ON
+
+      - name: Build
+        # Use explicit build command
+        run: cmake --build ${{github.workspace}}/build --config ${{matrix.BUILD_TYPE}} -j 4
+
+      - name: Test
+        working-directory: ${{github.workspace}}/build
+
+        run: ./cryptodd_arrays_test
+        env:
+          MIMALLOC_SHOW_STATS: 1
+          MIMALLOC_VERBOSE: 1
+          MIMALLOC_SHOW_ERRORS: 1
+
+      - name: Benchmark
+        if: ${{ matrix.BUILD_TYPE == 'Release' }}
+        working-directory: ${{github.workspace}}/build
+
+        run: ./all_simd_benchmark
+        env:
+          MIMALLOC_SHOW_STATS: 1
+          MIMALLOC_VERBOSE: 1
+          MIMALLOC_SHOW_ERRORS: 1
+
+      - name: Show ccache stats
+        run: ccache -s
+
+      - name: Upload Build and Test Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          # Use BUILD_TYPE from the matrix in the artifact name
+          name: ubuntu-${{matrix.BUILD_TYPE}}-mimalloc-${{ matrix.USE_MIMALLOC }}-triplet-${{ matrix.VCPKG_TARGET_TRIPLET }}-artifacts
+          # Use BUILD_TYPE from the matrix in the path
+          path: |
+            ${{github.workspace}}/build
+            !${{github.workspace}}/build/vcpkg_installed
+          retention-days: 7

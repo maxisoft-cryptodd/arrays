@@ -1,4 +1,8 @@
-name: CMake on a single platform
+name: CMake on Windows
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
@@ -19,7 +23,7 @@ jobs:
       matrix:
         BUILD_TYPE: [RelWithDebInfo, Debug]
         USE_MIMALLOC: [on, off]
-        VCPKG_TARGET_TRIPLET: [x64-windows, x64-mingw-dynamic]
+        VCPKG_TARGET_TRIPLET: [x64-windows]
     name: '${{ matrix.BUILD_TYPE }} / mimalloc: ${{ matrix.USE_MIMALLOC }} / triplet: ${{ matrix.VCPKG_TARGET_TRIPLET }}'
 
     steps:
@@ -38,6 +42,7 @@ jobs:
             vcpkg/packages
             vcpkg_installed
             .py-build-cmake_cache/*/vcpkg_installed
+            build/vcpkg_installed
           # The cache key should depend on all variables that change dependencies
           key: ${{ runner.os }}-${{ matrix.BUILD_TYPE }}-mimalloc-${{ matrix.USE_MIMALLOC }}-triplet-${{ matrix.VCPKG_TARGET_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
@@ -47,11 +52,11 @@ jobs:
         run: .\vcpkg\bootstrap-vcpkg.bat
 
       - name: Add msbuild to PATH
-        if: ${{ matrix.VCPKG_TARGET_TRIPLET != 'x64-mingw' }}
+        if: ${{ matrix.VCPKG_TARGET_TRIPLET != 'x64-mingw-static' }}
         uses: microsoft/setup-msbuild@v2
 
       - name: Set up MinGW
-        if: ${{ matrix.VCPKG_TARGET_TRIPLET == 'x64-mingw' }}
+        if: ${{ matrix.VCPKG_TARGET_TRIPLET == 'x64-mingw-static' }}
         shell: pwsh
         run: |
           echo "PATH=C:\msys64\usr\bin;$Env:PATH" | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
@@ -99,6 +104,6 @@ jobs:
           name: windows-${{matrix.BUILD_TYPE}}-mimalloc-${{ matrix.USE_MIMALLOC }}-triplet-${{ matrix.VCPKG_TARGET_TRIPLET }}-artifacts
           # Use BUILD_TYPE from the matrix in the path
           path: |
-            ${{github.workspace}}/build/${{matrix.BUILD_TYPE}}/
-            ${{github.workspace}}/build/Testing/
+            ${{github.workspace}}/build
+            !${{github.workspace}}/build/vcpkg_installed
           retention-days: 7

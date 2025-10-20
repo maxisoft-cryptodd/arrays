@@ -30,6 +30,13 @@ endif ()
 
 project(cryptodd_arrays VERSION 0.0.1 LANGUAGES CXX)
 
+find_program(CCACHE_PROGRAM ccache)
+if(LINUX AND CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    message(STATUS "Using ccache: ${CCACHE_PROGRAM}")
+endif()
+
 # ==================================================================================================
 # Project Options
 # ==================================================================================================
@@ -165,9 +172,9 @@ target_include_directories(cryptodd_arrays_shared PRIVATE
 add_executable(cryptodd_arrays_exe main.cpp)
 target_link_libraries(cryptodd_arrays_exe PRIVATE cryptodd_arrays_lib)
 if(USE_MIMALLOC)
-    # For the final executable, we override global new/delete.
-    # This is the correct place to do it, not in the library.
     target_sources(cryptodd_arrays_exe PRIVATE src/memory/mimalloc_override.cpp)
+    target_link_libraries(cryptodd_arrays_exe PRIVATE mimalloc)
+    target_compile_definitions(cryptodd_arrays_exe PUBLIC USE_MIMALLOC)
 endif()
 
 # Add a test executable
@@ -187,15 +194,14 @@ add_executable(cryptodd_arrays_test
         test/c_api/c_api_temporal_1d_simd_tests.cpp
         test/c_api/c_api_temporal_2d_simd_tests.cpp
 )
-target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
-
 
 if(USE_MIMALLOC)
+    target_sources(cryptodd_arrays_test PRIVATE src/memory/mimalloc_override.cpp)
     target_link_libraries(cryptodd_arrays_test PRIVATE mimalloc)
     target_compile_definitions(cryptodd_arrays_test PUBLIC USE_MIMALLOC)
-    # For the test, we override global new/delete.
-    target_sources(cryptodd_arrays_test PRIVATE src/memory/mimalloc_override.cpp)
 endif()
+
+target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
 
 enable_testing()
 include(GoogleTest)
@@ -215,9 +221,9 @@ target_link_libraries(all_simd_benchmark PRIVATE
 )
 
 if(USE_MIMALLOC)
-    target_compile_definitions(all_simd_benchmark PUBLIC USE_MIMALLOC)
-    # For the bench, we override global new/delete.
     target_sources(all_simd_benchmark PRIVATE src/memory/mimalloc_override.cpp)
+    target_link_libraries(cryptodd_arrays_test PRIVATE mimalloc)
+    target_compile_definitions(all_simd_benchmark PUBLIC USE_MIMALLOC)
 endif()
 
 # Add a benchmark executable for the new 1D codec
