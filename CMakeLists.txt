@@ -191,7 +191,7 @@ target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_ar
 
 
 if(USE_MIMALLOC)
-    target_link_libraries(cryptodd_arrays_test PRIVATE $<IF:$<TARGET_EXISTS:mimalloc-static>,mimalloc-static,mimalloc>)
+    target_link_libraries(cryptodd_arrays_test PRIVATE mimalloc)
     target_compile_definitions(cryptodd_arrays_test PUBLIC USE_MIMALLOC)
     # For the test, we override global new/delete.
     target_sources(cryptodd_arrays_test PRIVATE src/memory/mimalloc_override.cpp)
