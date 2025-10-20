@@ -20,7 +20,7 @@ jobs:
         BUILD_TYPE: [RelWithDebInfo, Debug]
         USE_MIMALLOC: [on, off]
         VCPKG_TARGET_TRIPLET: [x64-windows-static, x64-mingw-static]
-    name: '${{ matrix.BUILD_TYPE }} / mimalloc: ${{ matrix.USE_MIMALLOC }}'
+    name: '${{ matrix.BUILD_TYPE }} / mimalloc: ${{ matrix.USE_MIMALLOC }} / triplet: ${{ matrix.VCPKG_TARGET_TRIPLET }}'
 
     steps:
       - uses: actions/checkout@v4
@@ -52,9 +52,10 @@ jobs:
 
       - name: Set up MinGW
         if: ${{ matrix.VCPKG_TARGET_TRIPLET == 'x64-mingw-static' }}
-        uses: egor-tensin/setup-mingw@v2
-        with:
-          platform: x64
+        shell: pwsh
+        run: |
+          echo "PATH=C:\msys64\usr\bin;$Env:PATH" | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
+          g++ --version
 
       - name: Install uv and set the Python version
         uses: astral-sh/setup-uv@v6
@@ -75,7 +76,7 @@ jobs:
         # Pass the BUILD_TYPE from the matrix and the USE_MIMALLOC option
         # Note: -DUSE_MIMALLOC is technically redundant here because build_wheel.py updates pyproject.toml and CMakeLists.txt
         # to handle this, but keeping it as an explicit parameter is harmless.
-        run: cmake -B ${{github.workspace}}/build -DVCPKG_TARGET_TRIPLET=${{ matrix.VCPKG_TARGET_TRIPLET}} -DCMAKE_BUILD_TYPE=${{matrix.BUILD_TYPE}} -DUSE_MIMALLOC=${{ matrix.USE_MIMALLOC }} -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake
+        run: cmake -B ${{github.workspace}}/build -DVCPKG_TARGET_TRIPLET=${{ matrix.VCPKG_TARGET_TRIPLET}} -DCMAKE_BUILD_TYPE=${{matrix.BUILD_TYPE}} -DUSE_MIMALLOC=${{ matrix.USE_MIMALLOC }} -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake -DMI_SECURE=ON
 
       - name: Build
         # Use explicit build command
@@ -85,6 +86,10 @@ jobs:
         working-directory: ${{github.workspace}}/build
         # Use BUILD_TYPE from the matrix
         run: ctest -C ${{matrix.BUILD_TYPE}} -V
+        env:
+          MIMALLOC_SHOW_STATS: 1
+          MIMALLOC_VERBOSE: 1
+          MIMALLOC_SHOW_ERRORS: 1
 
       - name: Upload Build and Test Artifacts
         uses: actions/upload-artifact@v4
