@@ -187,9 +187,11 @@ add_executable(cryptodd_arrays_test
         test/c_api/c_api_temporal_1d_simd_tests.cpp
         test/c_api/c_api_temporal_2d_simd_tests.cpp
 )
-target_link_libraries(cryptodd_arrays_test PRIVATE mimalloc GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
+target_link_libraries(cryptodd_arrays_test PRIVATE GTest::gtest_main cryptodd_arrays_lib cryptodd_arrays_shared stduuid)
+
 
 if(USE_MIMALLOC)
+    target_link_libraries(cryptodd_arrays_test PRIVATE $<IF:$<TARGET_EXISTS:mimalloc-static>,mimalloc-static,mimalloc>)
     target_compile_definitions(cryptodd_arrays_test PUBLIC USE_MIMALLOC)
     # For the test, we override global new/delete.
     target_sources(cryptodd_arrays_test PRIVATE src/memory/mimalloc_override.cpp)
