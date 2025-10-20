@@ -202,7 +202,7 @@ def get_config(args: argparse.Namespace) -> dict:
         raise NotImplementedError(f"Unsupported platform: {system}")
 
     mimalloc_setting = args.use_mimalloc or os.environ.get("CRYPTODD_USE_MIMALLOC")
-    if not mimalloc_setting:
+    if mimalloc_setting is None:
         mimalloc_setting = "off" if detect_musl() else "on"
     mimalloc_setting = mimalloc_setting.lower() in {"on", "true", "1", "yes", "y"}
     mimalloc_setting = "on" if mimalloc_setting else "off"
