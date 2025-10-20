@@ -33,7 +33,7 @@ project(cryptodd_arrays VERSION 0.0.1 LANGUAGES CXX)
 # ==================================================================================================
 # Project Options
 # ==================================================================================================
-option(USE_MIMALLOC "Enable the mimalloc memory allocator." ON)
+option(USE_MIMALLOC "Enable the mimalloc memory allocator." on)
 
 # Suppress the "CMAKE_TOOLCHAIN_FILE not used" warning.
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -101,7 +101,9 @@ find_package(blake3 CONFIG REQUIRED)
 find_package(stduuid CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
 find_package(mio CONFIG REQUIRED)
-find_package(mimalloc CONFIG REQUIRED)
+if (USE_MIMALLOC)
+    find_package(mimalloc CONFIG REQUIRED)
+endif()
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(turbobase64 CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)

@@ -1,0 +1,15 @@
+{
+  "name": "mimalloc",
+  "version-string": "empty",
+  "port-version": 0,
+  "description": "Empty overlay port disable mimalloc",
+  "dependencies": [],
+  "features": {
+    "override": {
+      "description": ""
+    },
+    "secure": {
+      "description": ""
+    }
+  }
+}
