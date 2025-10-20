@@ -34,12 +34,13 @@ jobs:
             vcpkg/installed
             vcpkg/buildtrees
             vcpkg/downloads
+            vcpkg/packages
+            vcpkg_installed
+            .py-build-cmake_cache/*/vcpkg_installed
           # The cache key should depend on all variables that change dependencies
           key: ${{ runner.os }}-${{ matrix.BUILD_TYPE }}-mimalloc-${{ matrix.USE_MIMALLOC }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.BUILD_TYPE }}-mimalloc-${{ matrix.USE_MIMALLOC }}-
-            ${{ runner.os }}-${{ matrix.BUILD_TYPE }}-mimalloc-
-            ${{ runner.os }}-${{ matrix.BUILD_TYPE }}-
 
       - name: Bootstrap vcpkg
         run: .\vcpkg\bootstrap-vcpkg.bat
@@ -60,14 +61,13 @@ jobs:
           uv tool install cmake
           uv tool install ninja
           .venv/Scripts/activate
-          # Corrected: Added all required arguments for build_wheel.py
           python ${{github.workspace}}/build_wheel.py --use-mimalloc ${{ matrix.USE_MIMALLOC }} --prepare-only --no-cleanup --skip-git-checks
 
       - name: Configure CMake
         # Pass the BUILD_TYPE from the matrix and the USE_MIMALLOC option
         # Note: -DUSE_MIMALLOC is technically redundant here because build_wheel.py updates pyproject.toml and CMakeLists.txt
         # to handle this, but keeping it as an explicit parameter is harmless.
-        run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.BUILD_TYPE}} -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake -DUSE_MIMALLOC=${{ matrix.USE_MIMALLOC }} -DHWY_DISABLED_TARGETS="(HWY_AVX2|HWY_AVX512|HWY_AVX3|HWY_AVX3_DL|HWY_AVX3_ZEN4|HWY_AVX3_SPR)"
+        run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.BUILD_TYPE}} -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake -DUSE_MIMALLOC=${{ matrix.USE_MIMALLOC }}
 
       - name: Build
         # Use explicit build command

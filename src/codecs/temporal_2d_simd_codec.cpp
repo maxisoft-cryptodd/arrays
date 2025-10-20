@@ -227,10 +227,6 @@ HWY_NOINLINE void XorFloat32_2D(const float* HWY_RESTRICT soa_data, const float*
 HWY_NOINLINE void ShuffleFloat32_2D(const float* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out,
                                    size_t num_rows, size_t num_features) {
     const size_t total_elements = num_rows * num_features;
-    const hn::Repartition<uint16_t, decltype(du32)> d_u16_from_u32;
-    const hn::Repartition<uint8_t, decltype(du16)> d_u8_from_u16;
-    const size_t lanes_u32 = hn::Lanes(d32);
-    const size_t step = 4 * lanes_u32;
 
     for (size_t f = 0; f < num_features; ++f) {
         const float* HWY_RESTRICT feature_col_in = in + f * num_rows;
@@ -240,40 +236,36 @@ HWY_NOINLINE void ShuffleFloat32_2D(const float* HWY_RESTRICT in, uint8_t* HWY_R
         uint8_t* HWY_RESTRICT out_b3 = out + (3 * total_elements) + (f * num_rows);
 
         size_t i = 0;
+
 #if HWY_TARGET != HWY_SCALAR
-        for (; i + step <= num_rows; i += step) {
-            const VU32 v_in_a = hn::BitCast(du32, hn::LoadU(d32, feature_col_in + i + 0 * lanes_u32));
-            const VU32 v_in_b = hn::BitCast(du32, hn::LoadU(d32, feature_col_in + i + 1 * lanes_u32));
-            const VU32 v_in_c = hn::BitCast(du32, hn::LoadU(d32, feature_col_in + i + 2 * lanes_u32));
-            const VU32 v_in_d = hn::BitCast(du32, hn::LoadU(d32, feature_col_in + i + 3 * lanes_u32));
+        const hn::FixedTag<float, 4> d32_128;
+        const auto du32_128 = hn::Repartition<uint32_t, decltype(d32_128)>();
+        const auto du16_128 = hn::Repartition<uint16_t, decltype(d32_128)>();
+        const auto du8_128  = hn::Repartition<uint8_t, decltype(d32_128)>();
+        const hn::FixedTag<uint8_t, 4> du8_32;
 
-            const VU16 lo16_ab = hn::OrderedTruncate2To(d_u16_from_u32, v_in_a, v_in_b);
-            const VU16 hi16_ab = hn::OrderedTruncate2To(d_u16_from_u32, hn::ShiftRight<16>(v_in_a), hn::ShiftRight<16>(v_in_b));
-            const VU16 lo16_cd = hn::OrderedTruncate2To(d_u16_from_u32, v_in_c, v_in_d);
-            const VU16 hi16_cd = hn::OrderedTruncate2To(d_u16_from_u32, hn::ShiftRight<16>(v_in_c), hn::ShiftRight<16>(v_in_d));
+        for (; i + 4 <= num_rows; i += 4) {
+            const auto v_in = hn::LoadU(d32_128, feature_col_in + i);
 
-            const VU16 u16_lo_mask = hn::Set(du16, 0x00FF);
-            const VU16 p0_ab = hn::And(lo16_ab, u16_lo_mask);
-            const VU16 p1_ab = hn::ShiftRight<8>(lo16_ab);
-            const VU16 p2_ab = hn::And(hi16_ab, u16_lo_mask);
-            const VU16 p3_ab = hn::ShiftRight<8>(hi16_ab);
+            // De-interleave floats into byte planes using SIMD operations.
+            const auto v_u32 = hn::BitCast(du32_128, v_in);
+            const auto w_lo = hn::OrderedTruncate2To(du16_128, v_u32, v_u32);
+            const auto w_hi = hn::ShiftRight<16>(v_u32);
+            const auto w_hi_trunc = hn::OrderedTruncate2To(du16_128, w_hi, w_hi);
 
-            const VU16 p0_cd = hn::And(lo16_cd, u16_lo_mask);
-            const VU16 p1_cd = hn::ShiftRight<8>(lo16_cd);
-            const VU16 p2_cd = hn::And(hi16_cd, u16_lo_mask);
-            const VU16 p3_cd = hn::ShiftRight<8>(hi16_cd);
+            const auto b0 = hn::OrderedTruncate2To(du8_128, w_lo, w_lo);
+            const auto b1 = hn::OrderedTruncate2To(du8_128, hn::ShiftRight<8>(w_lo), hn::ShiftRight<8>(w_lo));
+            const auto b2 = hn::OrderedTruncate2To(du8_128, w_hi_trunc, w_hi_trunc);
+            const auto b3 = hn::OrderedTruncate2To(du8_128, hn::ShiftRight<8>(w_hi_trunc), hn::ShiftRight<8>(w_hi_trunc));
 
-            const auto plane0 = hn::OrderedTruncate2To(d_u8_from_u16, p0_ab, p0_cd);
-            const auto plane1 = hn::OrderedTruncate2To(d_u8_from_u16, p1_ab, p1_cd);
-            const auto plane2 = hn::OrderedTruncate2To(d_u8_from_u16, p2_ab, p2_cd);
-            const auto plane3 = hn::OrderedTruncate2To(d_u8_from_u16, p3_ab, p3_cd);
-
-            hn::StoreU(plane0, d_u8_from_u16, out_b0 + i);
-            hn::StoreU(plane1, d_u8_from_u16, out_b1 + i);
-            hn::StoreU(plane2, d_u8_from_u16, out_b2 + i);
-            hn::StoreU(plane3, d_u8_from_u16, out_b3 + i);
+            // Store the 4 resulting bytes for each plane.
+            hn::StoreU(hn::ResizeBitCast(du8_32, b0), du8_32, out_b0 + i);
+            hn::StoreU(hn::ResizeBitCast(du8_32, b1), du8_32, out_b1 + i);
+            hn::StoreU(hn::ResizeBitCast(du8_32, b2), du8_32, out_b2 + i);
+            hn::StoreU(hn::ResizeBitCast(du8_32, b3), du8_32, out_b3 + i);
         }
 #endif
+
         // Scalar remainder loop
         for (; i < num_rows; ++i) {
             const uint32_t val = hwy::BitCastScalar<uint32_t>(feature_col_in[i]);
@@ -288,11 +280,6 @@ HWY_NOINLINE void ShuffleFloat32_2D(const float* HWY_RESTRICT in, uint8_t* HWY_R
 HWY_NOINLINE void UnshuffleAndReconstruct32_2D(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out,
                                                size_t num_rows, size_t num_features, std::span<float> prev_row_state) {
     const size_t total_elements = num_rows * num_features;
-    const hn::Repartition<uint8_t, decltype(du16)> d_u8_from_u16;
-    const hn::Repartition<uint16_t, decltype(du8)> d_u16_from_u8;
-    const hn::Repartition<uint32_t, decltype(du16)> d_u32_from_u16;
-    const size_t lanes_u32 = hn::Lanes(d32);
-    const size_t step = 4 * lanes_u32;
 
     for (size_t f = 0; f < num_features; ++f) {
         float* HWY_RESTRICT feature_out = out + f * num_rows;
@@ -300,66 +287,50 @@ HWY_NOINLINE void UnshuffleAndReconstruct32_2D(const uint8_t* HWY_RESTRICT shuff
         const uint8_t* HWY_RESTRICT in_b1 = shuffled_in + (1 * total_elements) + (f * num_rows);
         const uint8_t* HWY_RESTRICT in_b2 = shuffled_in + (2 * total_elements) + (f * num_rows);
         const uint8_t* HWY_RESTRICT in_b3 = shuffled_in + (3 * total_elements) + (f * num_rows);
-        
+
         uint32_t prev_u32 = hwy::BitCastScalar<uint32_t>(prev_row_state[f]);
 
         size_t i = 0;
+
 #if HWY_TARGET != HWY_SCALAR
-        for (; i + step <= num_rows; i += step) {
-            constexpr size_t kPrefetchLookahead = 2;
-            if (i + (kPrefetchLookahead * step) < num_rows) {
-                hwy::Prefetch(in_b0 + i + (kPrefetchLookahead * step));
-                hwy::Prefetch(in_b1 + i + (kPrefetchLookahead * step));
-                hwy::Prefetch(in_b2 + i + (kPrefetchLookahead * step));
-                hwy::Prefetch(in_b3 + i + (kPrefetchLookahead * step));
-            }
+        const hn::FixedTag<float, 4> d32_128;
+        const auto du32_128 = hn::Repartition<uint32_t, decltype(d32_128)>();
+        const auto du16_128 = hn::Repartition<uint16_t, decltype(d32_128)>();
+        const auto du8_128  = hn::Repartition<uint8_t, decltype(d32_128)>();
+        const hn::FixedTag<uint8_t, 4> du8_32;
 
-            const hn::Repartition<uint8_t, decltype(d_u8_from_u16)> d_u8_from_u16_rebind;
-            const auto v_p0 = hn::LoadU(d_u8_from_u16_rebind, in_b0 + i);
-            const auto v_p1 = hn::LoadU(d_u8_from_u16_rebind, in_b1 + i);
-            const auto v_p2 = hn::LoadU(d_u8_from_u16_rebind, in_b2 + i);
-            const auto v_p3 = hn::LoadU(d_u8_from_u16_rebind, in_b3 + i);
+        for (; i + 4 <= num_rows; i += 4) {
+            const auto v_b0 = hn::LoadU(du8_32, in_b0 + i);
+            const auto v_b1 = hn::LoadU(du8_32, in_b1 + i);
+            const auto v_b2 = hn::LoadU(du8_32, in_b2 + i);
+            const auto v_b3 = hn::LoadU(du8_32, in_b3 + i);
 
-            const auto t0_ab = hn::ZipLower(d_u16_from_u8, v_p0, v_p1);
-            const auto t1_ab = hn::ZipLower(d_u16_from_u8, v_p2, v_p3);
-            const auto t0_cd = hn::ZipUpper(d_u16_from_u8, v_p0, v_p1);
-            const auto t1_cd = hn::ZipUpper(d_u16_from_u8, v_p2, v_p3);
+            const auto v_p0 = hn::ResizeBitCast(du8_128, v_b0);
+            const auto v_p1 = hn::ResizeBitCast(du8_128, v_b1);
+            const auto v_p2 = hn::ResizeBitCast(du8_128, v_b2);
+            const auto v_p3 = hn::ResizeBitCast(du8_128, v_b3);
 
-            const VU32 delta_a = hn::ZipLower(d_u32_from_u16, t0_ab, t1_ab);
-            const VU32 delta_b = hn::ZipUpper(d_u32_from_u16, t0_ab, t1_ab);
-            const VU32 delta_c = hn::ZipLower(d_u32_from_u16, t0_cd, t1_cd);
-            const VU32 delta_d = hn::ZipUpper(d_u32_from_u16, t0_cd, t1_cd);
+            const auto t0 = hn::ZipLower(du16_128, v_p0, v_p1);
+            const auto t1 = hn::ZipLower(du16_128, v_p2, v_p3);
 
-            auto InclusiveScan = [lanes_u32](VU32 v) {
-                for (size_t dist = 1; dist < lanes_u32; dist *= 2) {
-                    v = hn::Xor(v, hn::SlideUpLanes(du32, v, dist));
-                }
-                return v;
-            };
+            // **FIXED**: Use 'auto' to let the compiler deduce the correct Vec128 type.
+            const auto v_delta_u32 = hn::ZipLower(du32_128, t0, t1);
 
-            // --- START OF FIX ---
-            // Correctly chain the serial dependency between vectors.
-            VU32 recon_a = hn::Xor(InclusiveScan(delta_a), hn::Set(du32, prev_u32));
-            uint32_t last_val = hn::ExtractLane(recon_a, lanes_u32 - 1);
+            // **FIXED**: Use 'auto' for consistency.
+            auto v_scan = v_delta_u32;
+            v_scan = hn::Xor(v_scan, hn::SlideUpLanes(du32_128, v_scan, 1));
+            v_scan = hn::Xor(v_scan, hn::SlideUpLanes(du32_128, v_scan, 2));
 
-            VU32 recon_b = hn::Xor(InclusiveScan(delta_b), hn::Set(du32, last_val));
-            last_val = hn::ExtractLane(recon_b, lanes_u32 - 1);
+            // **FIXED**: Use 'auto' here as well.
+            const auto v_prev_bcast = hn::Set(du32_128, prev_u32);
+            const auto v_recon_u32 = hn::Xor(v_scan, v_prev_bcast);
 
-            VU32 recon_c = hn::Xor(InclusiveScan(delta_c), hn::Set(du32, last_val));
-            last_val = hn::ExtractLane(recon_c, lanes_u32 - 1);
-            
-            VU32 recon_d = hn::Xor(InclusiveScan(delta_d), hn::Set(du32, last_val));
-            
-            // The new prev_u32 for the *next* iteration of this outer loop
-            prev_u32 = hn::ExtractLane(recon_d, lanes_u32 - 1);
-            // --- END OF FIX ---
+            hn::StoreU(hn::BitCast(d32_128, v_recon_u32), d32_128, feature_out + i);
 
-            hn::StoreU(hn::BitCast(d32, recon_a), d32, feature_out + i + 0 * lanes_u32);
-            hn::StoreU(hn::BitCast(d32, recon_b), d32, feature_out + i + 1 * lanes_u32);
-            hn::StoreU(hn::BitCast(d32, recon_c), d32, feature_out + i + 2 * lanes_u32);
-            hn::StoreU(hn::BitCast(d32, recon_d), d32, feature_out + i + 3 * lanes_u32);
+            prev_u32 = hn::ExtractLane(v_recon_u32, 3);
         }
 #endif
+
         // Scalar remainder loop
         for (; i < num_rows; ++i) {
             const uint32_t u32_delta = (static_cast<uint32_t>(in_b3[i]) << 24) |
