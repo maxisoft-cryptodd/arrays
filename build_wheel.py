@@ -306,6 +306,8 @@ def main():
 
         print("\n--- Starting wheel build ---")
         Path(args.outdir).mkdir(exist_ok=True)
+        if detect_musl():
+            os.environ["VCPKG_FORCE_SYSTEM_BINARIES"] = "1"
         build_command = [sys.executable, "-m", "pip", "wheel", "-v", "--wheel-dir", args.outdir, "."] + build_args
         run_command(build_command)
 
