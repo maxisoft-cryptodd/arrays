@@ -67,7 +67,7 @@ jobs:
         # Pass the BUILD_TYPE from the matrix and the USE_MIMALLOC option
         # Note: -DUSE_MIMALLOC is technically redundant here because build_wheel.py updates pyproject.toml and CMakeLists.txt
         # to handle this, but keeping it as an explicit parameter is harmless.
-        run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.BUILD_TYPE}} -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake -DUSE_MIMALLOC=${{ matrix.USE_MIMALLOC }}
+        run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.BUILD_TYPE}} -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake -DUSE_MIMALLOC=${{ matrix.USE_MIMALLOC }} -DHWY_DISABLED_TARGETS="(HWY_AVX2|HWY_AVX512|HWY_AVX3|HWY_AVX3_DL|HWY_AVX3_ZEN4|HWY_AVX3_SPR)"
 
       - name: Build
         # Use explicit build command
