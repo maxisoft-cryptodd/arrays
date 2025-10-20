@@ -154,57 +154,41 @@ HWY_NOINLINE void DemoteFloat32ToFloat16(const float* HWY_RESTRICT in, size_t nu
     }
 }
 
-// This pattern de-interleaves float16 values (viewed as uint16_t) into two separate
-// planes of low bytes and high bytes. It is compatible with all SIMD targets (except HWY_SCALAR).
+
 HWY_NOINLINE void ShuffleFloat16(const hwy::float16_t* HWY_RESTRICT in, uint8_t* HWY_RESTRICT out, size_t num_f16) {
-    uint8_t* HWY_RESTRICT out_b0 = out;          // Plane for lower bytes
-    uint8_t* HWY_RESTRICT out_b1 = out + num_f16; // Plane for higher bytes
-#if HWY_TARGET == HWY_SCALAR
-    // SCALAR PATH START
-    for (size_t i = 0; i < num_f16; ++i) {
-        const uint16_t val = hwy::BitCastScalar<uint16_t>(in[i]);
-        out_b0[i] = static_cast<uint8_t>(val & 0xFF);
-        out_b1[i] = static_cast<uint8_t>(val >> 8);
-    }
-    // SCALAR PATH END
-#else
-    // SIMD PATH START
+
+    uint8_t* HWY_RESTRICT out_b0 = out;
+    uint8_t* HWY_RESTRICT out_b1 = out + num_f16;
+    size_t i = 0;
+
+#if HWY_TARGET != HWY_SCALAR
     const hn::Repartition<uint8_t, decltype(du16)> d_u8_packed;
     const size_t lanes_u16 = hn::Lanes(du16);
-
-    // Process two vectors' worth of data per loop because OrderedTruncate2To combines two vectors.
     const size_t step = 2 * lanes_u16;
-    size_t i = 0;
+
     for (; i + step <= num_f16; i += step) {
-        // Load two vectors of float16 and view them as uint16
         const VU16 v_in_a = hn::BitCast(du16, hn::LoadU(d16, in + i));
         const VU16 v_in_b = hn::BitCast(du16, hn::LoadU(d16, in + i + lanes_u16));
 
-        // Isolate lower bytes (e.g., L0, L1, ...) and higher bytes (H0, H1, ...)
         const VU16 lo_mask = hn::Set(du16, 0x00FF);
         const VU16 v_lo_a = hn::And(v_in_a, lo_mask);
         const VU16 v_hi_a = hn::ShiftRight<8>(v_in_a);
         const VU16 v_lo_b = hn::And(v_in_b, lo_mask);
         const VU16 v_hi_b = hn::ShiftRight<8>(v_in_b);
 
-        // Pack the 8-bit results from two uint16 vectors into a single uint8 vector.
-        // This replaces the non-existent `PackU16ToU8` with the correct Highway function.
         auto packed_lo = hn::OrderedTruncate2To(d_u8_packed, v_lo_a, v_lo_b);
         auto packed_hi = hn::OrderedTruncate2To(d_u8_packed, v_hi_a, v_hi_b);
 
-        // Store the packed byte planes.
         hn::StoreU(packed_lo, d_u8_packed, out_b0 + i);
         hn::StoreU(packed_hi, d_u8_packed, out_b1 + i);
     }
+#endif
 
-    // Remainder loop for SIMD path (if num_f16 is not a multiple of `step`)
     for (; i < num_f16; ++i) {
         const auto val = hwy::BitCastScalar<uint16_t>(in[i]);
         out_b0[i] = static_cast<uint8_t>(val & 0xFF);
         out_b1[i] = static_cast<uint8_t>(val >> 8);
     }
-    // SIMD PATH END
-#endif
 }
 
 // --- ENCODING PIPELINE (FLOAT32) ---
@@ -249,52 +233,39 @@ HWY_NOINLINE void ShuffleFloat32(const float* HWY_RESTRICT in, uint8_t* HWY_REST
     size_t i = 0;
 
 #if HWY_TARGET != HWY_SCALAR
-    // SIMD PATH
-    const hn::Repartition<uint16_t, decltype(du32)> d_u16_from_u32;
-    const hn::Repartition<uint8_t, decltype(du16)> d_u8_from_u16;
-    const size_t lanes_u32 = hn::Lanes(d32);
-    const size_t step = 4 * lanes_u32; // Process four u32 vectors at a time
+    const hn::FixedTag<float, 4> d32_128;
+    const auto du32_128 = hn::Repartition<uint32_t, decltype(d32_128)>();
+    const auto du16_128 = hn::Repartition<uint16_t, decltype(d32_128)>();
+    const auto du8_128  = hn::Repartition<uint8_t, decltype(d32_128)>();
+    const hn::FixedTag<uint8_t, 4> du8_32; // For storing 4-byte chunks
 
-    for (; i + step <= num_f32; i += step) {
-        // Load four vectors of float32, treat as uint32
-        const VU32 v_in_a = hn::BitCast(du32, hn::LoadU(d32, in + i + 0 * lanes_u32));
-        const VU32 v_in_b = hn::BitCast(du32, hn::LoadU(d32, in + i + 1 * lanes_u32));
-        const VU32 v_in_c = hn::BitCast(du32, hn::LoadU(d32, in + i + 2 * lanes_u32));
-        const VU32 v_in_d = hn::BitCast(du32, hn::LoadU(d32, in + i + 3 * lanes_u32));
+    for (; i + 4 <= num_f32; i += 4) {
+        const auto v_in = hn::LoadU(d32_128, in + i);
 
-        // De-interleave u32 -> u16
-        const VU16 lo16_ab = hn::OrderedTruncate2To(d_u16_from_u32, v_in_a, v_in_b);
-        const VU16 hi16_ab = hn::OrderedTruncate2To(d_u16_from_u32, hn::ShiftRight<16>(v_in_a), hn::ShiftRight<16>(v_in_b));
-        const VU16 lo16_cd = hn::OrderedTruncate2To(d_u16_from_u32, v_in_c, v_in_d);
-        const VU16 hi16_cd = hn::OrderedTruncate2To(d_u16_from_u32, hn::ShiftRight<16>(v_in_c), hn::ShiftRight<16>(v_in_d));
+        // De-interleave floats into byte planes using two stages of Zip operations.
+        // This is the inverse of the logic in UnshuffleAndReconstructFloat32.
 
-        // De-interleave u16 -> u8
-        const VU16 u16_lo_mask = hn::Set(du16, 0x00FF);
-        const VU16 p0_ab = hn::And(lo16_ab, u16_lo_mask);
-        const VU16 p1_ab = hn::ShiftRight<8>(lo16_ab);
-        const VU16 p2_ab = hn::And(hi16_ab, u16_lo_mask);
-        const VU16 p3_ab = hn::ShiftRight<8>(hi16_ab);
+        // Stage 1: De-interleave u32 -> u16 (separates high/low 16 bits of each float)
+        const auto v_u32 = hn::BitCast(du32_128, v_in);
+        const auto w_lo = hn::OrderedTruncate2To(du16_128, v_u32, v_u32);
+        const auto w_hi = hn::ShiftRight<16>(v_u32);
+        const auto w_hi_trunc = hn::OrderedTruncate2To(du16_128, w_hi, w_hi);
 
-        const VU16 p0_cd = hn::And(lo16_cd, u16_lo_mask);
-        const VU16 p1_cd = hn::ShiftRight<8>(lo16_cd);
-        const VU16 p2_cd = hn::And(hi16_cd, u16_lo_mask);
-        const VU16 p3_cd = hn::ShiftRight<8>(hi16_cd);
+        // Stage 2: De-interleave u16 -> u8 (separates bytes)
+        const auto b0 = hn::OrderedTruncate2To(du8_128, w_lo, w_lo);
+        const auto b1 = hn::OrderedTruncate2To(du8_128, hn::ShiftRight<8>(w_lo), hn::ShiftRight<8>(w_lo));
+        const auto b2 = hn::OrderedTruncate2To(du8_128, w_hi_trunc, w_hi_trunc);
+        const auto b3 = hn::OrderedTruncate2To(du8_128, hn::ShiftRight<8>(w_hi_trunc), hn::ShiftRight<8>(w_hi_trunc));
 
-        // Pack the final byte planes
-        const auto plane0 = hn::OrderedTruncate2To(d_u8_from_u16, p0_ab, p0_cd);
-        const auto plane1 = hn::OrderedTruncate2To(d_u8_from_u16, p1_ab, p1_cd);
-        const auto plane2 = hn::OrderedTruncate2To(d_u8_from_u16, p2_ab, p2_cd);
-        const auto plane3 = hn::OrderedTruncate2To(d_u8_from_u16, p3_ab, p3_cd);
-
-        // Store the final byte planes
-        hn::StoreU(plane0, d_u8_from_u16, out_b0 + i);
-        hn::StoreU(plane1, d_u8_from_u16, out_b1 + i);
-        hn::StoreU(plane2, d_u8_from_u16, out_b2 + i);
-        hn::StoreU(plane3, d_u8_from_u16, out_b3 + i);
+        // Store 4 bytes to each plane.
+        hn::StoreU(hn::ResizeBitCast(du8_32, b0), du8_32, out_b0 + i);
+        hn::StoreU(hn::ResizeBitCast(du8_32, b1), du8_32, out_b1 + i);
+        hn::StoreU(hn::ResizeBitCast(du8_32, b2), du8_32, out_b2 + i);
+        hn::StoreU(hn::ResizeBitCast(du8_32, b3), du8_32, out_b3 + i);
     }
 #endif
 
-    // SCALAR/REMAINDER PATH
+    // Scalar remainder for any leftover floats
     for (; i < num_f32; ++i) {
         const uint32_t val = hwy::BitCastScalar<uint32_t>(in[i]);
         out_b0[i] = static_cast<uint8_t>((val      ) & 0xFF);
@@ -303,6 +274,7 @@ HWY_NOINLINE void ShuffleFloat32(const float* HWY_RESTRICT in, uint8_t* HWY_REST
         out_b3[i] = static_cast<uint8_t>((val >> 24) & 0xFF);
     }
 }
+
 
 void UnshuffleAndReconstructFloat32(const uint8_t* HWY_RESTRICT shuffled_in, float* HWY_RESTRICT out,
                                     size_t num_snapshots, size_t snapshot_floats,
@@ -314,23 +286,7 @@ void UnshuffleAndReconstructFloat32(const uint8_t* HWY_RESTRICT shuffled_in, flo
     std::copy_n(last_snapshot_state.data(), num_floats_per_snapshot, prev_snapshot_f32.get());
     float* HWY_RESTRICT prev_snapshot_ptr = prev_snapshot_f32.get();
 
-    // How many snapshots ahead we want to prefetch. This is a tuning parameter.
-    // A value of 1-4 is often a good starting point.
-    constexpr size_t kPrefetchSnapshots = 2;
-
     for (size_t s = 0; s < num_snapshots; ++s) {
-        // --- Prefetching Logic ---
-        // Issue hints to the CPU to start loading data for a future snapshot.
-        // This helps hide memory latency. We must check boundaries to avoid
-        // reading past the end of the array.
-        if (s + kPrefetchSnapshots < num_snapshots) {
-            const size_t next_base_idx = (s + kPrefetchSnapshots) * num_floats_per_snapshot;
-            hwy::Prefetch(shuffled_in + next_base_idx);
-            hwy::Prefetch(shuffled_in + total_floats + next_base_idx);
-            hwy::Prefetch(shuffled_in + 2 * total_floats + next_base_idx);
-            hwy::Prefetch(shuffled_in + 3 * total_floats + next_base_idx);
-        }
-
         float* HWY_RESTRICT current_out_ptr = out + s * num_floats_per_snapshot;
         const size_t base_idx = s * num_floats_per_snapshot;
         const uint8_t* HWY_RESTRICT in_b0 = shuffled_in + base_idx;
@@ -340,57 +296,45 @@ void UnshuffleAndReconstructFloat32(const uint8_t* HWY_RESTRICT shuffled_in, flo
         size_t i = 0;
 
 #if HWY_TARGET != HWY_SCALAR
-        // SIMD PATH
-        const hn::Repartition<uint8_t, decltype(du16)> d_u8_from_u16; // Tag for loading bytes
-        const hn::Repartition<uint16_t, decltype(du8)> d_u16_from_u8;
-        const hn::Repartition<uint32_t, decltype(du16)> d_u32_from_u16;
-        const size_t lanes_u32 = hn::Lanes(d32);
-        const size_t step = 4 * lanes_u32; // Process four u32 vectors at a time
+        const hn::FixedTag<float, 4> d32_128;
+        const auto du32_128 = hn::Repartition<uint32_t, decltype(d32_128)>();
+        const auto du16_128 = hn::Repartition<uint16_t, decltype(d32_128)>();
+        const auto du8_128  = hn::Repartition<uint8_t, decltype(d32_128)>();
+        const hn::FixedTag<uint8_t, 4> du8_32;
 
-        for (; i + step <= num_floats_per_snapshot; i += step) {
-            // Load byte planes using the correct u8 tag
-            const auto v_p0 = hn::LoadU(d_u8_from_u16, in_b0 + i);
-            const auto v_p1 = hn::LoadU(d_u8_from_u16, in_b1 + i);
-            const auto v_p2 = hn::LoadU(d_u8_from_u16, in_b2 + i);
-            const auto v_p3 = hn::LoadU(d_u8_from_u16, in_b3 + i);
+        for (; i + 4 <= num_floats_per_snapshot; i += 4) {
+            // Load 4 bytes from each plane into small vectors.
+            const auto v_b0 = hn::LoadU(du8_32, in_b0 + i);
+            const auto v_b1 = hn::LoadU(du8_32, in_b1 + i);
+            const auto v_b2 = hn::LoadU(du8_32, in_b2 + i);
+            const auto v_b3 = hn::LoadU(du8_32, in_b3 + i);
 
-            // Interleave u8 -> u16
-            const auto t0_ab = hn::ZipLower(d_u16_from_u8, v_p0, v_p1);
-            const auto t1_ab = hn::ZipLower(d_u16_from_u8, v_p2, v_p3);
-            const auto t0_cd = hn::ZipUpper(d_u16_from_u8, v_p0, v_p1);
-            const auto t1_cd = hn::ZipUpper(d_u16_from_u8, v_p2, v_p3);
+            // **FIXED**: Use ResizeBitCast to expand 4-byte vectors to 16-byte vectors.
+            // This is the correct and simple way to prepare for the Zip operations.
+            const auto v_p0 = hn::ResizeBitCast(du8_128, v_b0);
+            const auto v_p1 = hn::ResizeBitCast(du8_128, v_b1);
+            const auto v_p2 = hn::ResizeBitCast(du8_128, v_b2);
+            const auto v_p3 = hn::ResizeBitCast(du8_128, v_b3);
 
-            // Interleave u16 -> u32
-            const VU32 delta_a = hn::ZipLower(d_u32_from_u16, t0_ab, t1_ab);
-            const VU32 delta_b = hn::ZipUpper(d_u32_from_u16, t0_ab, t1_ab);
-            const VU32 delta_c = hn::ZipLower(d_u32_from_u16, t0_cd, t1_cd);
-            const VU32 delta_d = hn::ZipUpper(d_u32_from_u16, t0_cd, t1_cd);
+            // Stage 1: Interleave pairs of byte vectors into word vectors.
+            const auto t0 = hn::ZipLower(du16_128, v_p0, v_p1); // [b1_0:b0_0, b1_1:b0_1, ...]
+            const auto t1 = hn::ZipLower(du16_128, v_p2, v_p3); // [b3_0:b2_0, b3_1:b2_1, ...]
 
-            // Load previous state
-            const VF32 prev_a = hn::Load(d32, prev_snapshot_ptr + i + 0 * lanes_u32);
-            const VF32 prev_b = hn::Load(d32, prev_snapshot_ptr + i + 1 * lanes_u32);
-            const VF32 prev_c = hn::Load(d32, prev_snapshot_ptr + i + 2 * lanes_u32);
-            const VF32 prev_d = hn::Load(d32, prev_snapshot_ptr + i + 3 * lanes_u32);
+            // Stage 2: Interleave word vectors into dword vectors.
+            const auto v_delta_u32 = hn::ZipLower(du32_128, t0, t1); // [b3_0:b2_0:b1_0:b0_0, ...]
 
-            // Reconstruct by XORing
-            const VF32 recon_a = hn::BitCast(d32, hn::Xor(delta_a, hn::BitCast(du32, prev_a)));
-            const VF32 recon_b = hn::BitCast(d32, hn::Xor(delta_b, hn::BitCast(du32, prev_b)));
-            const VF32 recon_c = hn::BitCast(d32, hn::Xor(delta_c, hn::BitCast(du32, prev_c)));
-            const VF32 recon_d = hn::BitCast(d32, hn::Xor(delta_d, hn::BitCast(du32, prev_d)));
+            // Load previous state, XOR to reconstruct, and store results.
+            const auto v_prev_f32 = hn::Load(d32_128, prev_snapshot_ptr + i);
+            const auto v_prev_u32 = hn::BitCast(du32_128, v_prev_f32);
+            const auto v_recon_u32 = hn::Xor(v_delta_u32, v_prev_u32);
 
-            // Store results to prev state and final output
-            hn::Store(recon_a, d32, prev_snapshot_ptr + i + 0 * lanes_u32);
-            hn::Store(recon_b, d32, prev_snapshot_ptr + i + 1 * lanes_u32);
-            hn::Store(recon_c, d32, prev_snapshot_ptr + i + 2 * lanes_u32);
-            hn::Store(recon_d, d32, prev_snapshot_ptr + i + 3 * lanes_u32);
-
-            hn::StoreU(recon_a, d32, current_out_ptr + i + 0 * lanes_u32);
-            hn::StoreU(recon_b, d32, current_out_ptr + i + 1 * lanes_u32);
-            hn::StoreU(recon_c, d32, current_out_ptr + i + 2 * lanes_u32);
-            hn::StoreU(recon_d, d32, current_out_ptr + i + 3 * lanes_u32);
+            const auto v_recon_f32 = hn::BitCast(d32_128, v_recon_u32);
+            hn::Store(v_recon_f32, d32_128, prev_snapshot_ptr + i);
+            hn::StoreU(v_recon_f32, d32_128, current_out_ptr + i);
         }
 #endif
-        // SCALAR/REMAINDER PATH
+
+        // Scalar remainder for any leftover floats
         for (; i < num_floats_per_snapshot; ++i) {
             const uint32_t u32_delta = (static_cast<uint32_t>(in_b3[i]) << 24) |
                                        (static_cast<uint32_t>(in_b2[i]) << 16) |
@@ -414,107 +358,59 @@ void UnshuffleAndReconstruct16(const uint8_t* HWY_RESTRICT shuffled_in, float* H
     const size_t num_floats_per_snapshot = snapshot_floats;
     const size_t total_floats = num_snapshots * num_floats_per_snapshot;
 
-    // We need the previous state in float16 format for the reconstruction loop.
-    // So we demote it once here.
     auto prev_snapshot_f16 = hwy::AllocateAligned<hwy::float16_t>(num_floats_per_snapshot);
-    DemoteFloat32ToFloat16(last_snapshot_state.data(), num_floats_per_snapshot, prev_snapshot_f16.get());    hwy::float16_t* HWY_RESTRICT prev_snapshot_ptr = prev_snapshot_f16.get();
-
-    // How many snapshots ahead we want to prefetch. This is a tuning parameter.
-    constexpr size_t kPrefetchSnapshots = 1;
+    DemoteFloat32ToFloat16(last_snapshot_state.data(), num_floats_per_snapshot, prev_snapshot_f16.get());
+    hwy::float16_t* HWY_RESTRICT prev_snapshot_ptr = prev_snapshot_f16.get();
 
     for (size_t s = 0; s < num_snapshots; ++s) {
         float* HWY_RESTRICT current_out_ptr = out + s * num_floats_per_snapshot;
         const size_t base_idx_bytes = s * num_floats_per_snapshot;
 
-        // --- Prefetching Logic ---
-        // Issue hints for the two byte planes for a future snapshot.
-        if (s + kPrefetchSnapshots < num_snapshots) {
-            const size_t next_base_idx = (s + kPrefetchSnapshots) * num_floats_per_snapshot;
-            hwy::Prefetch(shuffled_in + next_base_idx);
-            hwy::Prefetch(shuffled_in + total_floats + next_base_idx);
-        }
-
         size_t i = 0;
-#if HWY_TARGET == HWY_SCALAR
-        // SCALAR PATH START
-        for (; i < num_floats_per_snapshot; ++i) {
-            // Unshuffle bytes
-            const uint8_t b0 = shuffled_in[base_idx_bytes + i];
-            const uint8_t b1 = shuffled_in[total_floats + base_idx_bytes + i];
-            const uint16_t u16_delta = (static_cast<uint16_t>(b1) << 8) | b0;
-
-            // Get previous state as uint16
-            const uint16_t u16_prev = hwy::BitCastScalar<uint16_t>(prev_snapshot_ptr[i]);
-            
-            // Reconstruct the uint16 bit pattern
-            const uint16_t u16_recon = u16_delta ^ u16_prev;
-            
-            // This reconstructed uint16 IS the new state for the next snapshot
-            prev_snapshot_ptr[i] = hwy::BitCastScalar<hwy::float16_t>(u16_recon);
-            
-            // Promote the final value to float32 for output
-            current_out_ptr[i] = hwy::ConvertScalarTo<float>(prev_snapshot_ptr[i]);
-        }
-        // SCALAR PATH END
-#else
-        // SIMD PATH START
+#if HWY_TARGET != HWY_SCALAR
         const size_t f32_lanes = hn::Lanes(d32);
         const size_t f16_lanes = hn::Lanes(d16);
-        
-        // Process a full f16 vector's worth of floats at a time.
-        for (; i + f16_lanes <= num_floats_per_snapshot; i += f16_lanes) { // Corrected loop boundary
-            // Unshuffle bytes into a float16 vector of DELTAs
+
+        for (; i + f16_lanes <= num_floats_per_snapshot; i += f16_lanes) {
             const hn::Rebind<uint8_t, decltype(d16)> d_u8_rebind;
             const auto v_b0 = hn::LoadU(d_u8_rebind, shuffled_in + base_idx_bytes + i);
             const auto v_b1 = hn::LoadU(d_u8_rebind, shuffled_in + total_floats + base_idx_bytes + i);
-            
-            // Interleave the bytes back into uint16_t vectors. This is the reverse of the shuffle operation.
+
             const auto d_u16_half = hn::Half<decltype(du16)>();
             auto v_interleaved_lo = hn::ZipLower(d_u16_half, v_b0, v_b1);
             auto v_interleaved_hi = hn::ZipUpper(d_u16_half, v_b0, v_b1);
             VU16 v_delta_u16 = hn::Combine(du16, v_interleaved_hi, v_interleaved_lo);
 
-            // Load previous state (as float16)
             VF16 v_prev_f16 = hn::Load(d16, prev_snapshot_ptr + i);
             VU16 v_prev_u16 = hn::BitCast(du16, v_prev_f16);
 
-            // Reconstruct the float16 bit pattern
             VU16 v_recon_u16 = hn::Xor(v_delta_u16, v_prev_u16);
             VF16 v_recon_f16 = hn::BitCast(d16, v_recon_u16);
 
-            // This result IS the new state for the next snapshot. Store it back.
             hn::Store(v_recon_f16, d16, prev_snapshot_ptr + i);
 
-            // Promote the final reconstructed float16 to float32 for output
             VF32 v_out_f32_lo = hn::PromoteLowerTo(d32, v_recon_f16);
             VF32 v_out_f32_hi = hn::PromoteUpperTo(d32, v_recon_f16);
             hn::StoreU(v_out_f32_lo, d32, current_out_ptr + i);
             hn::StoreU(v_out_f32_hi, d32, current_out_ptr + i + f32_lanes);
         }
-        // Scalar remainder loop
+#endif
         for (; i < num_floats_per_snapshot; ++i) {
             const uint8_t b0 = shuffled_in[base_idx_bytes + i];
             const uint8_t b1 = shuffled_in[total_floats + base_idx_bytes + i];
             const uint16_t u16_delta = (static_cast<uint16_t>(b1) << 8) | b0;
-
             const uint16_t u16_prev = hwy::BitCastScalar<uint16_t>(prev_snapshot_ptr[i]);
-            
             const uint16_t u16_recon = u16_delta ^ u16_prev;
-            
             prev_snapshot_ptr[i] = hwy::BitCastScalar<hwy::float16_t>(u16_recon);
-            
             current_out_ptr[i] = hwy::ConvertScalarTo<float>(prev_snapshot_ptr[i]);
         }
-        // SIMD PATH END
-#endif
-        // Here, prev_snapshot_ptr has been updated in-place to become the current snapshot's state
     }
 
-    // Now, update the output state by promoting our final f16 state back to f32
     for(size_t i = 0; i < num_floats_per_snapshot; ++i) {
         last_snapshot_state[i] = hwy::ConvertScalarTo<float>(prev_snapshot_ptr[i]);
     }
 }
+
 
 } // namespace cryptodd::HWY_NAMESPACE
 }
