@@ -8,6 +8,8 @@
 #include <string>
 #include <numeric>
 #include <cmath>
+#include <cstdint>
+
 #include "float_conversion_simd_codec.h" // For F16 conversion check
 
 namespace fs = std::filesystem;
@@ -157,7 +159,8 @@ protected:
 
             auto store_res = execute_op(writer, store_req, std::as_bytes(data_part1));
             ASSERT_FALSE(store_res.is_null());
-            ASSERT_LT(store_res["details"]["compressed_size"].get<int64_t>(), data_part1.size_bytes());
+            const auto compressed_size = store_res["details"]["compressed_size"].template get<int64_t>();
+            ASSERT_LT(compressed_size, data_part1.size_bytes());
             handles_to_cleanup_.pop_back(); // Close context
         }
 
