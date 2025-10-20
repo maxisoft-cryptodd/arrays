@@ -195,7 +195,7 @@ if(USE_MIMALLOC)
     target_sources(cryptodd_arrays_test PRIVATE src/memory/mimalloc_override.cpp)
 endif()
 
-
+enable_testing()
 include(GoogleTest)
 gtest_discover_tests(cryptodd_arrays_test)
 
