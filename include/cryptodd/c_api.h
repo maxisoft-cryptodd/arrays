@@ -2,7 +2,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#ifdef STATIC_LIBRARY_BUILD
 #include "cryptodd_arrays_lib_export.h"
+#endif
 #ifdef SHARED_LIBRARY_BUILD
 #include "cryptodd_arrays_shared_export.h"
 #endif
@@ -11,8 +13,9 @@
 #define CRYPTODD_API CRYPTODD_ARRAYS_SHARED_EXPORT
 #elifdef  CRYPTODD_ARRAYS_LIB_EXPORT
 #define CRYPTODD_API CRYPTODD_ARRAYS_LIB_EXPORT
-#else
-#ifdef _WIN32
+#elifdef PYTHON_LIBRARY_BUILD
+#define CRYPTODD_API
+#elifdef _WIN32
 #ifdef CRYPTODD_DLL_EXPORTS
 #define CRYPTODD_API __declspec(dllexport)
 #else
@@ -20,7 +23,6 @@
 #endif
 #else
 #define CRYPTODD_API __attribute__((visibility("default")))
-#endif
 #endif
 
 
