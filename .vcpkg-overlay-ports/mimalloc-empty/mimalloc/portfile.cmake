@@ -1,0 +1,2 @@
+set(VCPKG_POLICY_EMPTY_PACKAGE enabled)
+set(_USE_MIMALLOC off)
