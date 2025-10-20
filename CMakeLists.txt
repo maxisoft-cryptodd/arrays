@@ -141,6 +141,8 @@ target_include_directories(cryptodd_arrays_lib PRIVATE ${MAPBOX_ETERNAL_INCLUDE_
 
 target_compile_definitions(cryptodd_arrays_lib PRIVATE STATIC_LIBRARY_BUILD)
 
+set_target_properties(cryptodd_arrays_lib PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+
 add_library(cryptodd_arrays_shared SHARED
         library.cpp
         src/c_api/c_api.cpp
