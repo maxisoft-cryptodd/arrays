@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 4.0)
 
+# If on MSVC / Windows, set the vcpkg triplet to x64-windows-static
+if(MSVC AND NOT DEFINED VCPKG_TARGET_TRIPLET)
+    set(VCPKG_TARGET_TRIPLET x64-windows-static CACHE STRING "")
+endif()
+
 # Set up vcpkg integration. This logic must run before the project() command.
 # This makes the project easier to configure without relying on presets or command-line args.
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -109,7 +114,7 @@ find_package(pybind11 CONFIG REQUIRED)
 
 # Conditionally add and link mimalloc
 if(USE_MIMALLOC)
-    target_compile_definitions(cryptodd_arrays_lib PUBLIC USE_MIMALLOC)
+    target_compile_definitions(cryptodd_arrays_lib PRIVATE USE_MIMALLOC)
     # The library links to mimalloc to use its STL allocator internally
     target_link_libraries(cryptodd_arrays_lib PRIVATE $<IF:$<TARGET_EXISTS:mimalloc-static>,mimalloc-static,mimalloc>)
 endif()
@@ -132,6 +137,8 @@ target_link_libraries(cryptodd_arrays_lib
 find_path(MAPBOX_ETERNAL_INCLUDE_DIRS "mapbox/eternal.hpp")
 target_include_directories(cryptodd_arrays_lib PRIVATE ${MAPBOX_ETERNAL_INCLUDE_DIRS})
 
+target_compile_definitions(cryptodd_arrays_lib PRIVATE STATIC_LIBRARY_BUILD)
+
 add_library(cryptodd_arrays_shared SHARED
         library.cpp
         src/c_api/c_api.cpp
@@ -146,7 +153,7 @@ target_link_libraries(cryptodd_arrays_shared PRIVATE cryptodd_arrays_lib)
 GENERATE_EXPORT_HEADER(cryptodd_arrays_lib)
 GENERATE_EXPORT_HEADER(cryptodd_arrays_shared)
 
-target_include_directories(cryptodd_arrays_shared PUBLIC
+target_include_directories(cryptodd_arrays_shared PRIVATE
         "${CMAKE_BINARY_DIR}"
         cryptodd_arrays_lib
 )
@@ -227,15 +234,41 @@ target_link_libraries(temporal_2d_simd_benchmark PRIVATE
         cryptodd_arrays_lib
 )
 
-pybind11_add_module(cryptodd_arrays_py src/python/cryptodd_arrays_py.cpp)
+pybind11_add_module(cryptodd_arrays_py src/python/cryptodd_arrays_pybind11.cpp)
+
 target_compile_definitions(cryptodd_arrays_py PRIVATE
         MODULE_NAME="cryptodd_arrays_cpp"
         VERSION_INFO="0.0.1"
 )
 set_target_properties(cryptodd_arrays_py PROPERTIES OUTPUT_NAME "cryptodd_arrays_cpp")
-target_link_libraries(cryptodd_arrays_py PRIVATE pybind11::pybind11 cryptodd_arrays_lib)
+target_link_libraries(cryptodd_arrays_py PRIVATE pybind11::pybind11)
+
+if(WIN32)
+target_sources(cryptodd_arrays_py PRIVATE
+        src/python/c_api_loader_win.cpp
+)
+else()
+    target_sources(cryptodd_arrays_py PRIVATE
+        src/python/c_api_loader_posix.cpp
+)
+endif()
+
+target_include_directories(cryptodd_arrays_py PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+)
+
+target_link_directories(cryptodd_arrays_py PRIVATE
+        "${CMAKE_BINARY_DIR}"
+)
+
+target_compile_definitions(cryptodd_arrays_py PRIVATE PYTHON_LIBRARY_BUILD)
 
 if(DEFINED PY_BUILD_CMAKE_IMPORT_NAME)
-    install(TARGETS cryptodd_arrays_py
+    if(MSVC)
+        target_compile_options(cryptodd_arrays_lib PRIVATE /MT)
+        target_compile_options(cryptodd_arrays_shared PRIVATE /MT)
+        target_compile_options(cryptodd_arrays_py PRIVATE /MD)
+    endif()
+    install(TARGETS cryptodd_arrays_py cryptodd_arrays_shared
         DESTINATION ${PY_BUILD_CMAKE_IMPORT_NAME})
 endif()
