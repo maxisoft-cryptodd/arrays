@@ -50,14 +50,14 @@ MioBackend::MioBackend(std::filesystem::path filepath, std::ios_base::openmode m
     if (file_size > 0) {
         if (writable_) {
             Impl::mmap_sink sink;
-            sink.map(filepath_.wstring(), ec);
+            sink.map(filepath_.native(), ec);
             if (ec) {
                 throw std::runtime_error("MioBackend: Failed to create read-write mapping: " + ec.message());
             }
             pimpl_->mapping = std::move(sink);
         } else {
             Impl::mmap_source source;
-            source.map(filepath_.wstring(), ec);
+            source.map(filepath_.native(), ec);
             if (ec) {
                 throw std::runtime_error("MioBackend: Failed to create read-only mapping: " + ec.message());
             }
@@ -101,7 +101,7 @@ std::expected<void, std::string> MioBackend::remap(uint64_t required_size) {
 
     // Create a new mapping of the larger file
     Impl::mmap_sink new_sink;
-    new_sink.map(filepath_.wstring(), ec);
+    new_sink.map(filepath_.native(), ec);
     if (ec) {
         return std::unexpected("MioBackend: Failed to remap file after resize: " + ec.message());
     }
@@ -182,7 +182,7 @@ std::expected<void, std::string> MioBackend::seek(uint64_t offset) {
                     return std::unexpected("MioBackend: Failed to resize file on seek: " + ec.message());
                 }
                 Impl::mmap_sink new_sink;
-                new_sink.map(filepath_.wstring(), ec);
+                new_sink.map(filepath_.native(), ec);
                 if (ec) {
                     return std::unexpected("MioBackend: Failed to remap after seek resize: " + ec.message());
                 }

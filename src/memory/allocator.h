@@ -1,6 +1,11 @@
 #pragma once
 
 #include <vector>
+#include <cstddef>
+// ReSharper disable once CppUnusedIncludeDirective
+#include <cstdint>
+#include <type_traits>
+
 
 // Conditionally include mimalloc headers if USE_MIMALLOC is defined by CMake.
 #ifdef USE_MIMALLOC

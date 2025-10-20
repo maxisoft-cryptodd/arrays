@@ -206,6 +206,7 @@ def get_config(args: argparse.Namespace) -> dict:
         mimalloc_setting = "off" if detect_musl() else "on"
     mimalloc_setting = mimalloc_setting.lower() in {"on", "true", "1", "yes", "y"}
     mimalloc_setting = "on" if mimalloc_setting else "off"
+    config['use_mimalloc'] = mimalloc_setting
     return config
 
 def manage_mimalloc_overlay(use_mimalloc: str) -> str | None:
@@ -248,6 +249,8 @@ def update_pyproject_toml(triplet: str, use_mimalloc: str):
         new_options["CMAKE_MSVC_RUNTIME_LIBRARY"] = '"MultiThreadedDLL"'
     options_str = ", ".join([f'{k}={v}' for k, v in new_options.items()])
     content = re.sub(r'^\s*options\s*=\s*{.*}', f'options = {{ {options_str} }}', content, flags=re.MULTILINE)
+    if sys.platform != "win32":
+        content = re.sub(r'^\s*build_type\s*=\s*".*?"', f'build_type = "Release" ', content, flags=re.MULTILINE)
     PYPROJECT_TOML_PATH.write_text(content, encoding="utf-8")
 
 # --- Main Execution ---
