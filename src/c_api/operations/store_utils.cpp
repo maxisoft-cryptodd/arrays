@@ -48,11 +48,11 @@ std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
         }
     }
 
-    if ((flags & (cryptodd::ChunkFlags::LITTLE_ENDIAN | cryptodd::ChunkFlags::BIG_ENDIAN)) == 0) {
+    if ((flags & (cryptodd::ChunkFlags::FLAG_LITTLE_ENDIAN | cryptodd::ChunkFlags::FLAG_BIG_ENDIAN)) == 0) {
         if constexpr (std::endian::native == std::endian::little) {
-            flags |= cryptodd::ChunkFlags::LITTLE_ENDIAN;
+            flags |= cryptodd::ChunkFlags::FLAG_LITTLE_ENDIAN;
         } else if constexpr (std::endian::native == std::endian::big) {
-            flags |= cryptodd::ChunkFlags::BIG_ENDIAN;
+            flags |= cryptodd::ChunkFlags::FLAG_BIG_ENDIAN;
         }
     }
     auto direct_hash = is_perfect_reconstructible(codec);
