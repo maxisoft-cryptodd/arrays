@@ -28,7 +28,7 @@ endif()
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
 endif ()
 
-project(cryptodd_arrays)
+project(cryptodd_arrays VERSION 0.0.1 LANGUAGES CXX)
 
 # ==================================================================================================
 # Project Options
@@ -235,6 +235,10 @@ target_link_libraries(temporal_2d_simd_benchmark PRIVATE
 )
 
 pybind11_add_module(cryptodd_arrays_py src/python/cryptodd_arrays_pybind11.cpp)
+
+if(LINUX)
+    target_compile_features(cryptodd_arrays_py PRIVATE cxx_std_20) # for manylinux_2_28
+endif()
 
 target_compile_definitions(cryptodd_arrays_py PRIVATE
         MODULE_NAME="cryptodd_arrays_cpp"
