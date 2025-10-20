@@ -118,7 +118,7 @@ find_package(pybind11 CONFIG REQUIRED)
 if(USE_MIMALLOC)
     target_compile_definitions(cryptodd_arrays_lib PRIVATE USE_MIMALLOC)
     # The library links to mimalloc to use its STL allocator internally
-    target_link_libraries(cryptodd_arrays_lib PRIVATE $<IF:$<TARGET_EXISTS:mimalloc-static>,mimalloc-static,mimalloc>)
+    target_link_libraries(cryptodd_arrays_lib PRIVATE mimalloc)
 endif()
 
 # Make the library's dependencies public
