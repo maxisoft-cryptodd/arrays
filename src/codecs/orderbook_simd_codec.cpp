@@ -293,45 +293,86 @@ void UnshuffleAndReconstructFloat32(const uint8_t* HWY_RESTRICT shuffled_in, flo
         size_t i = 0;
 
 #if HWY_TARGET != HWY_SCALAR
-        const hn::FixedTag<float, 4> d32_128;
-        const auto du32_128 = hn::Repartition<uint32_t, decltype(d32_128)>();
-        const auto du16_128 = hn::Repartition<uint16_t, decltype(d32_128)>();
-        const auto du8_128  = hn::Repartition<uint8_t, decltype(d32_128)>();
-        const hn::FixedTag<uint8_t, 4> du8_32;
+#if HWY_TARGET <= HWY_AVX2
+        {
+            // AVX2+ optimized path: Process 8 float32s (256 bits) at a time.
+            const hn::FixedTag<float, 8> d32_256;
+            const auto du32_256 = hn::Repartition<uint32_t, decltype(d32_256)>();
 
-        for (; i + 4 <= num_floats_per_snapshot; i += 4) {
-            // Load 4 bytes from each plane into small vectors.
-            const auto v_b0 = hn::LoadU(du8_32, in_b0 + i);
-            const auto v_b1 = hn::LoadU(du8_32, in_b1 + i);
-            const auto v_b2 = hn::LoadU(du8_32, in_b2 + i);
-            const auto v_b3 = hn::LoadU(du8_32, in_b3 + i);
+            // Tags for 128-bit interleaving stages
+            const hn::FixedTag<uint32_t, 4> du32_128;
+            const hn::FixedTag<uint16_t, 8> du16_128;
+            const hn::FixedTag<uint8_t, 16> du8_128;
+            const hn::FixedTag<uint8_t, 4> du8_32;
 
-            // **FIXED**: Use ResizeBitCast to expand 4-byte vectors to 16-byte vectors.
-            // This is the correct and simple way to prepare for the Zip operations.
-            const auto v_p0 = hn::ResizeBitCast(du8_128, v_b0);
-            const auto v_p1 = hn::ResizeBitCast(du8_128, v_b1);
-            const auto v_p2 = hn::ResizeBitCast(du8_128, v_b2);
-            const auto v_p3 = hn::ResizeBitCast(du8_128, v_b3);
+            const size_t lanes256 = hn::Lanes(d32_256);
+            if (lanes256 > 0) {
+                for (; i + lanes256 <= num_floats_per_snapshot; i += lanes256) {
+                    // --- Process the Lower 128-bit Block (floats 0-3) ---
+                    const auto v_b0_lo = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b0 + i));
+                    const auto v_b1_lo = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b1 + i));
+                    const auto v_b2_lo = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b2 + i));
+                    const auto v_b3_lo = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b3 + i));
 
-            // Stage 1: Interleave pairs of byte vectors into word vectors.
-            const auto t0 = hn::ZipLower(du16_128, v_p0, v_p1); // [b1_0:b0_0, b1_1:b0_1, ...]
-            const auto t1 = hn::ZipLower(du16_128, v_p2, v_p3); // [b3_0:b2_0, b3_1:b2_1, ...]
+                    const auto t0_lo = hn::ZipLower(du16_128, v_b0_lo, v_b1_lo);
+                    const auto t1_lo = hn::ZipLower(du16_128, v_b2_lo, v_b3_lo);
+                    const auto v_delta_lo = hn::ZipLower(du32_128, t0_lo, t1_lo);
 
-            // Stage 2: Interleave word vectors into dword vectors.
-            const auto v_delta_u32 = hn::ZipLower(du32_128, t0, t1); // [b3_0:b2_0:b1_0:b0_0, ...]
+                    // --- Process the Upper 128-bit Block (floats 4-7) ---
+                    const auto v_b0_hi = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b0 + i + 4));
+                    const auto v_b1_hi = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b1 + i + 4));
+                    const auto v_b2_hi = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b2 + i + 4));
+                    const auto v_b3_hi = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b3 + i + 4));
 
-            // Load previous state, XOR to reconstruct, and store results.
-            const auto v_prev_f32 = hn::Load(d32_128, prev_snapshot_ptr + i);
-            const auto v_prev_u32 = hn::BitCast(du32_128, v_prev_f32);
-            const auto v_recon_u32 = hn::Xor(v_delta_u32, v_prev_u32);
+                    const auto t0_hi = hn::ZipLower(du16_128, v_b0_hi, v_b1_hi);
+                    const auto t1_hi = hn::ZipLower(du16_128, v_b2_hi, v_b3_hi);
+                    const auto v_delta_hi = hn::ZipLower(du32_128, t0_hi, t1_hi);
 
-            const auto v_recon_f32 = hn::BitCast(d32_128, v_recon_u32);
-            hn::Store(v_recon_f32, d32_128, prev_snapshot_ptr + i);
-            hn::StoreU(v_recon_f32, d32_128, current_out_ptr + i);
+                    // 4. Combine into a single 256-bit vector.
+                    const auto v_delta_u32 = hn::Combine(du32_256, v_delta_hi, v_delta_lo);
+
+                    // 5. Reconstruct and store using full 256-bit operations.
+                    const auto v_prev_f32 = hn::LoadU(d32_256, prev_snapshot_ptr + i);
+                    const auto v_prev_u32 = hn::BitCast(du32_256, v_prev_f32);
+                    const auto v_recon_u32 = hn::Xor(v_delta_u32, v_prev_u32);
+                    const auto v_recon_f32 = hn::BitCast(d32_256, v_recon_u32);
+
+                    hn::StoreU(v_recon_f32, d32_256, prev_snapshot_ptr + i);
+                    hn::StoreU(v_recon_f32, d32_256, current_out_ptr + i);
+                }
+            }
         }
-#endif
+#endif // HWY_TARGET <= HWY_AVX2
+        {
+            // Fallback/SSE4 path: Process 4 float32s (128 bits) at a time.
+            const hn::FixedTag<float, 4> d32_128;
+            const auto du32_128 = hn::Repartition<uint32_t, decltype(d32_128)>();
+            const auto du16_128 = hn::Repartition<uint16_t, decltype(d32_128)>();
+            const auto du8_128  = hn::Repartition<uint8_t, decltype(d32_128)>();
+            const hn::FixedTag<uint8_t, 4> du8_32;
 
-        // Scalar remainder for any leftover floats
+            for (; i + 4 <= num_floats_per_snapshot; i += 4) {
+                const auto v_b0 = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b0 + i));
+                const auto v_b1 = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b1 + i));
+                const auto v_b2 = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b2 + i));
+                const auto v_b3 = hn::ResizeBitCast(du8_128, hn::LoadU(du8_32, in_b3 + i));
+
+                const auto t0 = hn::ZipLower(du16_128, v_b0, v_b1);
+                const auto t1 = hn::ZipLower(du16_128, v_b2, v_b3);
+                const auto v_delta_u32 = hn::ZipLower(du32_128, t0, t1);
+
+                const auto v_prev_f32 = hn::Load(d32_128, prev_snapshot_ptr + i);
+                const auto v_prev_u32 = hn::BitCast(du32_128, v_prev_f32);
+                const auto v_recon_u32 = hn::Xor(v_delta_u32, v_prev_u32);
+                const auto v_recon_f32 = hn::BitCast(d32_128, v_recon_u32);
+
+                hn::Store(v_recon_f32, d32_128, prev_snapshot_ptr + i);
+                hn::StoreU(v_recon_f32, d32_128, current_out_ptr + i);
+            }
+        }
+#endif // HWY_TARGET != HWY_SCALAR
+
+        // Scalar remainder loop (unchanged)
         for (; i < num_floats_per_snapshot; ++i) {
             const uint32_t u32_delta = (static_cast<uint32_t>(in_b3[i]) << 24) |
                                        (static_cast<uint32_t>(in_b2[i]) << 16) |
@@ -366,30 +407,81 @@ void UnshuffleAndReconstruct16(const uint8_t* HWY_RESTRICT shuffled_in, float* H
         size_t i = 0;
 
 #if HWY_TARGET != HWY_SCALAR
-        const hn::FixedTag<hwy::float16_t, 8> d16_128;
-        const auto du16_128 = hn::Repartition<uint16_t, decltype(d16_128)>();
-        const auto du8_128  = hn::Repartition<uint8_t, decltype(d16_128)>();
-        const hn::FixedTag<uint8_t, 8> du8_64;
-        const hn::FixedTag<float, 4> d32_128;
+#if HWY_TARGET <= HWY_AVX2
+        {
+            // AVX2+ optimized path: Process 16 float16s (256 bits) at a time.
+            // This path is safe because it respects the 128-bit block data layout
+            // from the shuffle operation by using block-aware primitives.
+            const hn::FixedTag<hwy::float16_t, 16> d16_256;
+            const hn::FixedTag<uint16_t, 16> du16_256;
+            const hn::FixedTag<float, 8> d32_256;
+            const hn::FixedTag<uint8_t, 16> du8_128; // We load 16 bytes (128 bits) per plane
+            const hn::FixedTag<uint16_t, 8> du16_128;
+            const hn::FixedTag<float, 4> d32_128;
 
-        for (; i + 8 <= num_floats_per_snapshot; i += 8) {
-            const auto v_b0_64 = hn::LoadU(du8_64, shuffled_in + base_idx_bytes + i);
-            const auto v_b1_64 = hn::LoadU(du8_64, shuffled_in + total_floats + base_idx_bytes + i);
+            const size_t lanes256 = hn::Lanes(d16_256);
+            if (lanes256 > 0) // Ensure this path is only taken if AVX2 is truly available
+            {
+                for (; i + lanes256 <= num_floats_per_snapshot; i += lanes256) {
+                    // 1. Load 16 bytes from each plane into 128-bit vectors.
+                    const auto v_b0 = hn::LoadU(du8_128, shuffled_in + base_idx_bytes + i);
+                    const auto v_b1 = hn::LoadU(du8_128, shuffled_in + total_floats + base_idx_bytes + i);
 
-            const auto v_b0_128 = hn::ResizeBitCast(du8_128, v_b0_64);
-            const auto v_b1_128 = hn::ResizeBitCast(du8_128, v_b1_64);
+                    // 2. Unshuffle (interleave) the bytes into two 128-bit uint16 vectors.
+                    // This is the CRITICAL step. InterleaveLower/Upper are 128-bit block-local,
+                    // which correctly reverses the 128-bit block-local ShuffleFloat16.
+                    const auto v_u16_lo_lanes = hn::InterleaveLower(v_b0, v_b1);
+                    const auto v_u16_hi_lanes = hn::InterleaveUpper(du8_128, v_b0, v_b1);
 
-            const auto v_delta_u16 = hn::ZipLower(du16_128, v_b0_128, v_b1_128);
+                    // 3. Combine the two 128-bit results into a single 256-bit vector.
+                    const auto v_delta_u16 = hn::Combine(du16_256,
+                                                         hn::BitCast(du16_128, v_u16_hi_lanes),
+                                                         hn::BitCast(du16_128, v_u16_lo_lanes));
 
-            const auto v_prev_u16 = hn::BitCast(du16_128, hn::LoadU(d16_128, prev_snapshot_ptr + i));
-            const auto v_recon_u16 = hn::Xor(v_delta_u16, v_prev_u16);
-            const auto v_recon_f16 = hn::BitCast(d16_128, v_recon_u16);
-            hn::StoreU(v_recon_f16, d16_128, prev_snapshot_ptr + i);
+                    // 4. Reconstruct, promote, and store using full 256-bit wide operations.
+                    const auto v_prev_u16 = hn::BitCast(du16_256, hn::LoadU(d16_256, prev_snapshot_ptr + i));
+                    const auto v_recon_u16 = hn::Xor(v_delta_u16, v_prev_u16);
+                    const auto v_recon_f16 = hn::BitCast(d16_256, v_recon_u16);
+                    hn::StoreU(v_recon_f16, d16_256, prev_snapshot_ptr + i);
 
-            auto v_out_f32_lo = hn::PromoteLowerTo(d32_128, v_recon_f16);
-            auto v_out_f32_hi = hn::PromoteUpperTo(d32_128, v_recon_f16);
-            hn::StoreU(v_out_f32_lo, d32_128, current_out_ptr + i);
-            hn::StoreU(v_out_f32_hi, d32_128, current_out_ptr + i + 4);
+                    // Promote the 256-bit f16 vector to two 256-bit f32 vectors
+                    const auto v_out_f32_lo = hn::PromoteLowerTo(d32_256, v_recon_f16);
+                    const auto v_out_f32_hi = hn::PromoteUpperTo(d32_256, v_recon_f16);
+                    hn::StoreU(v_out_f32_lo, d32_256, current_out_ptr + i);
+                    hn::StoreU(v_out_f32_hi, d32_256, current_out_ptr + i + hn::Lanes(d32_256));
+                }
+            }
+        }
+
+#endif
+
+        // SSE4 / Fallback path
+        {
+            const hn::FixedTag<hwy::float16_t, 8> d16_128;
+            const auto du16_128 = hn::Repartition<uint16_t, decltype(d16_128)>();
+            const auto du8_128  = hn::Repartition<uint8_t, decltype(d16_128)>();
+            const hn::FixedTag<uint8_t, 8> du8_64;
+            const hn::FixedTag<float, 4> d32_128;
+
+            for (; i + 8 <= num_floats_per_snapshot; i += 8) {
+                const auto v_b0_64 = hn::LoadU(du8_64, shuffled_in + base_idx_bytes + i);
+                const auto v_b1_64 = hn::LoadU(du8_64, shuffled_in + total_floats + base_idx_bytes + i);
+
+                const auto v_b0_128 = hn::ResizeBitCast(du8_128, v_b0_64);
+                const auto v_b1_128 = hn::ResizeBitCast(du8_128, v_b1_64);
+
+                const auto v_delta_u16 = hn::ZipLower(du16_128, v_b0_128, v_b1_128);
+
+                const auto v_prev_u16 = hn::BitCast(du16_128, hn::LoadU(d16_128, prev_snapshot_ptr + i));
+                const auto v_recon_u16 = hn::Xor(v_delta_u16, v_prev_u16);
+                const auto v_recon_f16 = hn::BitCast(d16_128, v_recon_u16);
+                hn::StoreU(v_recon_f16, d16_128, prev_snapshot_ptr + i);
+
+                auto v_out_f32_lo = hn::PromoteLowerTo(d32_128, v_recon_f16);
+                auto v_out_f32_hi = hn::PromoteUpperTo(d32_128, v_recon_f16);
+                hn::StoreU(v_out_f32_lo, d32_128, current_out_ptr + i);
+                hn::StoreU(v_out_f32_hi, d32_128, current_out_ptr + i + 4);
+            }
         }
 #endif
 
