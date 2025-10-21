@@ -360,18 +360,48 @@ HWY_NOINLINE void XorInt64_2D(const int64_t* HWY_RESTRICT soa_data, const int64_
 HWY_NOINLINE void UnXorInt64_2D(const int64_t* HWY_RESTRICT delta, int64_t* HWY_RESTRICT out,
                                 size_t num_rows, size_t num_features, std::span<int64_t> prev_row_state) {
     if (num_rows == 0) return;
+
     for (size_t f = 0; f < num_features; ++f) {
-        const int64_t* feature_delta = delta + f * num_rows;
-        int64_t* feature_out = out + f * num_rows;
-        
+        const int64_t* HWY_RESTRICT feature_delta = delta + f * num_rows;
+        int64_t* HWY_RESTRICT feature_out = out + f * num_rows;
+
         uint64_t prev_val_u64 = hwy::BitCastScalar<uint64_t>(prev_row_state[f]);
-        
-        for (size_t i = 0; i < num_rows; ++i) {
+
+        size_t i = 0;
+
+#if HWY_TARGET != HWY_SCALAR
+        const hn::FixedTag<int64_t, 2> di64_128;
+        const auto du64_128 = hn::Repartition<uint64_t, decltype(di64_128)>();
+
+        for (; i + 2 <= num_rows; i += 2) {
+            // Load 2 delta values
+            const auto v_delta_u64 = hn::BitCast(du64_128, hn::LoadU(di64_128, feature_delta + i));
+
+            // Perform an intra-vector prefix XOR scan: [d0, d1] -> [d0, d0^d1]
+            auto v_scan = hn::Xor(v_delta_u64, hn::SlideUpLanes(du64_128, v_delta_u64, 1));
+
+            // XOR with the previous state to get the final values
+            const auto v_prev_bcast = hn::Set(du64_128, prev_val_u64);
+            const auto v_recon_u64 = hn::Xor(v_scan, v_prev_bcast);
+
+            // Store the 2 reconstructed values
+            hn::StoreU(hn::BitCast(di64_128, v_recon_u64), di64_128, feature_out + i);
+
+            // Update the previous value for the next iteration with the last element
+            prev_val_u64 = hn::ExtractLane(v_recon_u64, 1);
+        }
+#endif
+
+        // Scalar remainder loop for any leftover elements
+        for (; i < num_rows; ++i) {
             const uint64_t u64_delta = hwy::BitCastScalar<uint64_t>(feature_delta[i]);
             prev_val_u64 = u64_delta ^ prev_val_u64;
             feature_out[i] = hwy::BitCastScalar<int64_t>(prev_val_u64);
         }
-        prev_row_state[f] = hwy::BitCastScalar<int64_t>(prev_val_u64);
+
+        if (num_rows > 0) {
+            prev_row_state[f] = hwy::BitCastScalar<int64_t>(prev_val_u64);
+        }
     }
 }
 
