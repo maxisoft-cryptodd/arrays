@@ -339,21 +339,22 @@ HWY_NOINLINE void UnXorInt64_1D(const int64_t* HWY_RESTRICT delta, int64_t* HWY_
     if (num_elements == 0) return;
     uint64_t prev_u64 = hwy::BitCastScalar<uint64_t>(prev_element);
     size_t i = 0;
-    const size_t lanes = hn::Lanes(du64);
 
 #if HWY_TARGET != HWY_SCALAR
-    for (; i + lanes <= num_elements; i += lanes) {
-        const VU64 v_delta = hn::BitCast(du64, hn::LoadU(di64, delta + i));
-        VU64 v_scan = v_delta;
-        for (size_t dist = 1; dist < lanes; dist *= 2) {
-            v_scan = hn::Xor(v_scan, hn::SlideUpLanes(du64, v_scan, dist));
-        }
-        VU64 v_recon = hn::Xor(v_scan, hn::Set(du64, prev_u64));
-        hn::StoreU(hn::BitCast(di64, v_recon), di64, out + i);
-        prev_u64 = hn::ExtractLane(v_recon, lanes - 1);
+    const hn::FixedTag<int64_t, 2> di64_128;
+    const auto du64_128 = hn::Repartition<uint64_t, decltype(di64_128)>();
+
+    for (; i + 2 <= num_elements; i += 2) {
+        const auto v_delta_u64 = hn::BitCast(du64_128, hn::LoadU(di64_128, delta + i));
+        auto v_scan = hn::Xor(v_delta_u64, hn::SlideUpLanes(du64_128, v_delta_u64, 1));
+        const auto v_prev_bcast = hn::Set(du64_128, prev_u64);
+        const auto v_recon_u64 = hn::Xor(v_scan, v_prev_bcast);
+        hn::StoreU(hn::BitCast(di64_128, v_recon_u64), di64_128, out + i);
+        prev_u64 = hn::ExtractLane(v_recon_u64, 1);
     }
 #endif
 
+    // Scalar remainder loop
     for (; i < num_elements; ++i) {
         prev_u64 = hwy::BitCastScalar<uint64_t>(delta[i]) ^ prev_u64;
         out[i] = hwy::BitCastScalar<int64_t>(prev_u64);
@@ -382,21 +383,21 @@ HWY_NOINLINE void CumulativeSumInt64_1D(const int64_t* HWY_RESTRICT delta, int64
     if (num_elements == 0) return;
     int64_t current_prev = prev_element;
     size_t i = 0;
-    const size_t lanes = hn::Lanes(di64);
 
 #if HWY_TARGET != HWY_SCALAR
-    for (; i + lanes <= num_elements; i += lanes) {
-        const VI64 v_delta = hn::LoadU(di64, delta + i);
-        VI64 v_scan = v_delta;
-        for (size_t dist = 1; dist < lanes; dist *= 2) {
-            v_scan = hn::Add(v_scan, hn::SlideUpLanes(di64, v_scan, dist));
-        }
-        VI64 v_recon = hn::Add(v_scan, hn::Set(di64, current_prev));
-        hn::StoreU(v_recon, di64, out + i);
-        current_prev = hn::ExtractLane(v_recon, lanes - 1);
+    const hn::FixedTag<int64_t, 2> di64_128;
+
+    for (; i + 2 <= num_elements; i += 2) {
+        const auto v_delta = hn::LoadU(di64_128, delta + i);
+        auto v_scan = hn::Add(v_delta, hn::SlideUpLanes(di64_128, v_delta, 1));
+        const auto v_prev_bcast = hn::Set(di64_128, current_prev);
+        const auto v_recon = hn::Add(v_scan, v_prev_bcast);
+        hn::StoreU(v_recon, di64_128, out + i);
+        current_prev = hn::ExtractLane(v_recon, 1);
     }
 #endif
 
+    // Scalar remainder loop
     for (; i < num_elements; ++i) {
         current_prev += delta[i];
         out[i] = current_prev;
