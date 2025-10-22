@@ -8,9 +8,10 @@ from typing import Optional, Union, Any
 
 from .file import Reader, Writer
 from .types import Codec
-from .dataclasses import ChunkInfo, StoreResult # DType is not used here, but ChunkInfo and StoreResult are
+from .dataclasses import ChunkInfo, StoreResult
 from .exceptions import CddError, CddOperationError, CddConfigError
 from .lowlevel import LowLevelWrapper
+from .convenience import save_array, load_array # Add this import
 
 __version__ = "0.0.1"
 
@@ -81,6 +82,8 @@ __all__ = [
     'open',
     'Reader',
     'Writer',
+    'save_array',
+    'load_array',
     'Codec',
     'ChunkInfo',
     'StoreResult',
