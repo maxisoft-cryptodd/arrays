@@ -8,6 +8,7 @@ from .types import Codec
 from .dataclasses import ChunkInfo, FileHeaderInfo, StoreResult
 from .exceptions import CddError, CddOperationError, CddConfigError
 from .convenience import save_array, load_array
+from .stream import BufferedAutoChunker, GroupedWriter, GroupedReader
 
 __version__ = "0.0.1"
 
@@ -16,6 +17,9 @@ __all__ = [
     'open',
     'Reader',
     'Writer',
+    'BufferedAutoChunker',
+    'GroupedWriter',
+    'GroupedReader',
     'save_array',
     'load_array',
     'Codec',

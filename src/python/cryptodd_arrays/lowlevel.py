@@ -23,10 +23,17 @@ class LowLevelWrapper:
             self._handle = _CddFile(json_config)
             self._closed = False
         except CppCddException as e:
-            # Errors during creation are usually config-related
-            raise CddConfigError.from_cpp_exception(e) from e
+            # Errors during creation are config-related.
+            # Instead of calling a non-existent factory method, we construct
+            # a detailed error message and instantiate CddConfigError directly.
+            code = getattr(e, "code", "N/A")
+            code_message = getattr(e, "code_message", "N/A")
+            msg = (
+                f"Failed to create context: {str(e)} "
+                f"(code={code}, name='{code_message}')"
+            )
+            raise CddConfigError(msg) from e
         except (RuntimeError, ValueError) as e:
-            # Catch other potential pybind11 startup errors
             raise CddConfigError(f"Failed to create context: {e}") from e
 
     def execute(

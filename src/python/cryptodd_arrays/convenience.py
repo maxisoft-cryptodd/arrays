@@ -5,7 +5,7 @@ High-level convenience functions for common single-array operations.
 from typing import Any, Optional
 import numpy as np
 
-from .file import open as cdd_open
+from .file import open as cdd_open, Writer, Reader
 from .types import Codec
 
 def save_array(
@@ -31,6 +31,7 @@ def save_array(
         **codec_params: Optional parameters for the codec (e.g., zstd_level).
     """
     with cdd_open(filepath, mode='w', user_metadata=user_metadata) as f:
+        assert isinstance(f, Writer)
         if codec is None:
             f.append(data, **codec_params)
         else:
@@ -54,6 +55,7 @@ def load_array(filepath: str, *, check_checksums: bool = True) -> np.ndarray:
         ValueError: If the file contains zero or more than one chunk.
     """
     with cdd_open(filepath, mode='r', check_checksums=check_checksums) as f:
+        assert isinstance(f, Reader)
         if f.nchunks != 1:
             raise ValueError(
                 f"Expected 1 chunk in the file but found {f.nchunks}. "
