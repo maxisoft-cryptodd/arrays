@@ -269,6 +269,8 @@ def main():
     parser.add_argument("--prepare-only", action="store_true", help="Prepare files but do not build.")
     parser.add_argument("--no-cleanup", action="store_true", help="Do not restore modified files after build.")
     parser.add_argument("--create-tag", action="store_true", help="Create a git tag after a successful build.")
+    parser.add_argument("--use-uv", action="store_true", help="Use 'uv' instead of 'pip' to build and install.")
+    parser.add_argument("--install", action="store_true", help="Install the built wheel after a successful build.")
     parser.add_argument("--skip-git-checks", action="store_true", help="Skip checking for a clean git repo.")
     args = parser.parse_args(script_args)
 
@@ -308,10 +310,28 @@ def main():
         Path(args.outdir).mkdir(exist_ok=True)
         if detect_musl():
             os.environ["VCPKG_FORCE_SYSTEM_BINARIES"] = "1"
-        build_command = [sys.executable, "-m", "pip", "wheel", "-v", "--wheel-dir", args.outdir, "."] + build_args
+
+        if args.use_uv:
+            build_command = ["uv", "pip", "wheel", "-v", "--out-dir", args.outdir, "."] + build_args
+        else:
+            build_command = [sys.executable, "-m", "pip", "wheel", "-v", "--wheel-dir", args.outdir, "."] + build_args
         run_command(build_command)
 
         print("\nBuild successful!")
+
+        if args.install:
+            print("\n--- Installing the built wheel ---")
+            wheel_files = list(Path(args.outdir).glob("*.whl"))
+            if not wheel_files:
+                print(f"Error: No wheel file found in '{args.outdir}'. Cannot install.", file=sys.stderr)
+                sys.exit(1)
+            wheel_to_install = wheel_files[0]
+            if args.use_uv:
+                install_command = ["uv", "pip", "install", str(wheel_to_install), "--force-reinstall"]
+            else:
+                install_command = [sys.executable, "-m", "pip", "install", str(wheel_to_install), "--force-reinstall"]
+            run_command(install_command)
+
         if args.create_tag:
             create_git_tag(config['version'])
 
