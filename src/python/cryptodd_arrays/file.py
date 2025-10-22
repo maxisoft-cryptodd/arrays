@@ -1,5 +1,5 @@
 # cryptodd_arrays/file.py
-"""High-level Reader and Writer classes for cryptodd-arrays files."""
+"""High-level Reader, Writer, and the main `open` factory function."""
 
 import json
 import base64
@@ -10,8 +10,82 @@ from functools import cached_property
 from .abc import CddFileBase
 from .lowlevel import LowLevelWrapper
 from .types import Codec
-from .dataclasses import ChunkInfo, StoreResult, FileHeaderInfo
+from .dataclasses import ChunkInfo, FileHeaderInfo, StoreResult
 from ._internal import json_builder, numpy_utils, codec_selector
+from .exceptions import CddConfigError # Import needed for `open`
+
+
+def open(
+    path: str,
+    mode: str = 'r',
+    *,
+    user_metadata: Optional[dict[str, Any]] = None,
+    check_checksums: bool = True
+) -> Union["Reader", "Writer"]:
+    """
+    Opens a cryptodd-arrays file for reading, writing, or appending.
+    This function is the primary entry point for the library.
+
+    Args:
+        path (str): Path to the .cdd file.
+        mode (str): 'r' (read-only), 'w' (write, truncates if exists),
+                    'a' (append to existing or create new).
+        user_metadata (dict, optional): For 'w' mode only. Sets the
+            file-level metadata upon creation. Must be JSON-serializable.
+        check_checksums (bool): For 'r' mode only. If True (default),
+            verifies data integrity on read.
+
+    Returns:
+        A Reader or Writer object, typically used within a `with` statement.
+
+    Raises:
+        CddConfigError: If the configuration is invalid (e.g., bad path).
+        ValueError: If mode or arguments are invalid.
+    """
+    backend_config: dict[str, Any]
+    writer_options: dict[str, Any] = {}
+
+    if mode == 'r':
+        if user_metadata is not None:
+            raise ValueError("user_metadata can only be provided in 'w' mode.")
+        backend_config = {"type": "File", "mode": "Read", "path": path}
+    elif mode in ('w', 'a'):
+        mode_str = "WriteTruncate" if mode == 'w' else "WriteAppend"
+        backend_config = {"type": "File", "mode": mode_str, "path": path}
+        if mode == 'w' and user_metadata is not None:
+            try:
+                json_str = json.dumps(user_metadata, separators=(',', ':'))
+                b64_str = base64.b64encode(json_str.encode('utf-8')).decode('ascii')
+                writer_options["user_metadata_base64"] = b64_str
+            except TypeError as e:
+                raise TypeError(f"user_metadata must be JSON-serializable. {e}") from e
+        elif mode == 'a' and user_metadata is not None:
+             raise ValueError("user_metadata cannot be provided in 'a' (append) mode.")
+    else:
+        raise ValueError(f"Unsupported mode: '{mode}'. Must be 'r', 'w', or 'a'.")
+
+    full_config = {"backend": backend_config}
+    if writer_options:
+        full_config["writer_options"] = writer_options
+
+    # We can't use json.dumps on the full_config here because LowLevelWrapper expects the config string.
+    # So we create the JSON string here.
+    try:
+        json_config_str = json.dumps(full_config)
+    except TypeError as e:
+        raise CddConfigError(f"Failed to serialize configuration to JSON: {e}") from e
+
+
+    wrapper = LowLevelWrapper(json_config_str)
+
+    if mode == 'r':
+        return Reader(wrapper, check_checksums=check_checksums)
+    else:
+        return Writer(wrapper)
+
+# =============================================================================
+# Writer and Reader classes remain the same as before
+# =============================================================================
 
 class Writer(CddFileBase):
     """

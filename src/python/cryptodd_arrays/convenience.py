@@ -5,7 +5,7 @@ High-level convenience functions for common single-array operations.
 from typing import Any, Optional
 import numpy as np
 
-from . import open as cdd_open
+from .file import open as cdd_open
 from .types import Codec
 
 def save_array(
