@@ -1,24 +1,47 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-#include "cryptodd/c_api.h"
 #include <stdexcept>
+#include <string>
 #include <vector>
+#include <cstdint>
+#include <numeric>
+#include <optional>
+#include <string_view>
+
+// CORRECTED: Use the actual headers from the project context
+#include "cryptodd/c_api.h"
 #include "c_api_loader.h"
 
 namespace py = pybind11;
 
 namespace
 {
+    // Helper to calculate total bytes from buffer_info
     size_t nbytes(const py::buffer_info& buffer_info)
     {
         return buffer_info.size * buffer_info.itemsize;
     }
 
-    constexpr size_t MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB limit
+    // Helper to verify C-style contiguity
+    bool is_c_contiguous(const py::buffer_info& info)
+    {
+        if (info.ndim == 0) return true;
+        if (info.ndim == 1) return info.strides[0] == info.itemsize || info.shape[0] <= 1;
+
+        py::ssize_t expected_stride = info.itemsize;
+        for (py::ssize_t i = info.ndim - 1; i >= 0; --i) {
+            if (info.shape[i] > 1 && info.strides[i] != expected_stride) {
+                return false;
+            }
+            expected_stride *= info.shape[i];
+        }
+        return true;
+    }
+
+    constexpr size_t MAX_RESPONSE_SIZE = 2 * 1024 * 1024;
 }
 
-// Define a custom C++ exception that can be caught in Python
 class CddException : public std::exception {
 public:
     CddException(std::string msg, int64_t code, std::string response_json)
@@ -37,7 +60,6 @@ public:
     CddFileWrapper(const std::string& json_config) {
         handle_ = cdd_context_create(json_config.c_str(), json_config.length());
         if (handle_ <= 0) {
-            // The response buffer is empty on creation failure, but we can get the error message.
             throw CddException("Failed to create context", handle_, cdd_error_message(handle_));
         }
     }
@@ -49,13 +71,14 @@ public:
         }
     }
 
-    // THE REVISED WORKHORSE METHOD
-    py::bytes _execute_op(py::object json_op, py::object input_data, py::object output_data) {
-        std::string json_op_str;
+    py::bytes _execute_op(py::object json_op, py::object input_data_obj, py::object output_data_obj) {
+        std::optional<std::string> json_op_str_storage;
+        std::string_view json_op_view;
         if (py::isinstance<py::str>(json_op)) {
-            json_op_str = json_op.cast<std::string>();
+            json_op_str_storage.emplace(json_op.cast<std::string>());
+            json_op_view = *json_op_str_storage;
         } else if (py::isinstance<py::bytes>(json_op)) {
-            json_op_str = json_op.cast<std::string>(); // Assumes UTF-8
+            json_op_view = json_op.cast<py::bytes>();
         } else {
             throw std::runtime_error("json_op must be str or bytes");
         }
@@ -63,27 +86,33 @@ public:
         const void* input_ptr = nullptr;
         int64_t input_bytes = 0;
         py::buffer_info input_buf;
-        if (!input_data.is_none()) {
+        if (!input_data_obj.is_none()) {
             try {
-                input_buf = py::buffer(input_data).request();
+                input_buf = py::buffer(input_data_obj).request();
+                if (!is_c_contiguous(input_buf)) {
+                    throw std::runtime_error("Input data must be a C-style contiguous buffer.");
+                }
+                input_ptr = input_buf.ptr;
+                input_bytes = nbytes(input_buf);
             } catch (const py::cast_error&) {
                 throw std::runtime_error("input_data must be a buffer-protocol compatible object (like a numpy array).");
             }
-            input_ptr = input_buf.ptr;
-            input_bytes = nbytes(input_buf);
         }
 
         void* output_ptr = nullptr;
         int64_t max_output_bytes = 0;
         py::buffer_info output_buf;
-        if (!output_data.is_none()) {
+        if (!output_data_obj.is_none()) {
             try {
-                 output_buf = py::buffer(output_data).request(true); // Writable
+                 output_buf = py::buffer(output_data_obj).request(true);
+                 if (!is_c_contiguous(output_buf)) {
+                    throw std::runtime_error("Output data must be a C-style contiguous buffer.");
+                 }
+                 output_ptr = output_buf.ptr;
+                 max_output_bytes = nbytes(output_buf);
             } catch (const py::cast_error&) {
                 throw std::runtime_error("output_data must be a writable buffer-protocol compatible object (like a numpy array).");
             }
-            output_ptr = output_buf.ptr;
-            max_output_bytes = nbytes(output_buf);
         }
 
         std::vector<char> response_buf(16384);
@@ -92,42 +121,36 @@ public:
         {
             py::gil_scoped_release release;
             while (true) {
-                status = cdd_execute_op(handle_, json_op_str.c_str(), json_op_str.length(),
+                status = cdd_execute_op(handle_, json_op_view.data(), json_op_view.length(),
                                       input_ptr, input_bytes,
                                       output_ptr, max_output_bytes,
                                       response_buf.data(), response_buf.size());
 
                 if (status == CDD_ERROR_RESPONSE_BUFFER_TOO_SMALL) {
                     if (response_buf.size() >= MAX_RESPONSE_SIZE) {
-                        // Re-acquire GIL to throw Python exception
                         py::gil_scoped_acquire acquire;
                         throw std::runtime_error("JSON response from C API exceeds 2MB limit.");
                     }
                     response_buf.resize(response_buf.size() * 2);
-                    continue; // Retry
+                    continue;
                 }
                 break;
             }
-        } // GIL re-acquired
+        }
 
         if (status != CDD_SUCCESS) {
             throw CddException("Operation failed", status, std::string(response_buf.data()));
         }
 
-        // Safely find the length of the null-terminated response string
         size_t response_len = strnlen(response_buf.data(), response_buf.size());
-
-        // Return the raw JSON response as Python bytes
-        return py::bytes(response_buf.data(), response_len);
+        return {response_buf.data(), response_len};
     }
-
 private:
     cdd_handle_t handle_{0};
 };
 
 PYBIND11_MODULE(cryptodd_arrays_cpp, m) {
     m.doc() = "Low-level C++ bridge for cryptodd-arrays.";
-    // Register the custom exception
     PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object> exc_storage;
     exc_storage.call_once_and_store_result(
         [&]() { return py::exception<CddException>(m, "CddException", PyExc_RuntimeError); });
@@ -139,7 +162,6 @@ PYBIND11_MODULE(cryptodd_arrays_cpp, m) {
         try {
             if (p) std::rethrow_exception(p);
         } catch (const CddException &e) {
-            // Create a Python CddException and set its attributes
             py::object py_exc = exc_storage.get_stored()();
             py_exc.attr("response_json") = e.response_json();
             py_exc.attr("code") = e.code();
