@@ -26,20 +26,18 @@ def recommend_codec(data: np.ndarray) -> Codec:
     Returns:
         The recommended Codec enum member.
     """
-    # Using Python 3.10+ structural pattern matching for a clean,
-    # declarative implementation of the heuristics.
-    match (data.ndim, data.dtype):
-        case (3, np.dtype('float32')):
+    match (data.ndim, data.dtype.name):
+        case (3, 'float32'):
             return Codec.GENERIC_OB_SIMD_F32
 
-        case (2, np.dtype('float32')):
+        case (2, 'float32'):
             return Codec.TEMPORAL_2D_SIMD_F32
-        case (2, np.dtype('int64')):
+        case (2, 'int64'):
             return Codec.TEMPORAL_2D_SIMD_I64
 
-        case (1, np.dtype('float32')):
+        case (1, 'float32'):
             return Codec.TEMPORAL_1D_SIMD_F32_XOR_SHUFFLE
-        case (1, np.dtype('int64')):
+        case (1, 'int64'):
             return Codec.TEMPORAL_1D_SIMD_I64_DELTA
 
         # Default case for all other shapes and dtypes
