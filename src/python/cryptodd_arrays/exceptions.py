@@ -33,7 +33,8 @@ class CddOperationError(CddError):
         response_json: dict[str, Any]
     ):
         super().__init__(message)
-        self.message = message
+        if getattr(self, message, '') != message:
+            self.message = message
         self.code = code
         self.code_message = code_message
         self.response_json = response_json
