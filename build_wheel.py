@@ -312,7 +312,7 @@ def main():
             os.environ["VCPKG_FORCE_SYSTEM_BINARIES"] = "1"
 
         if args.use_uv:
-            build_command = ["uv", "pip", "wheel", "-v", "--out-dir", args.outdir, "."] + build_args
+            build_command = ["uv", "build", "--wheel", "-v", "--out-dir", args.outdir, "."] + build_args
         else:
             build_command = [sys.executable, "-m", "pip", "wheel", "-v", "--wheel-dir", args.outdir, "."] + build_args
         run_command(build_command)
