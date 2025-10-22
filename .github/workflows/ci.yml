@@ -146,12 +146,23 @@ jobs:
         run: ccache -s
 
       - name: Build python wheel
+        if: ${{ matrix.BUILD_TYPE == 'Release' }}
         shell: pwsh
-        run: python ${{github.workspace}}/build_wheel.py --use-mimalloc ${{ matrix.USE_MIMALLOC }} --install --skip-git-checks
+        run: python ${{github.workspace}}/build_wheel.py --use-mimalloc ${{ matrix.USE_MIMALLOC }} --install --skip-git-checks --use-uv --no-cleanup
 
       - name: Run pytest
+        if: ${{ matrix.BUILD_TYPE == 'Release' }}
         shell: pwsh
-        run: uv run pytest -v ./tests
+        run: |
+          uv pip install .[test]
+          uv run pytest -v ${{github.workspace}}/tests
+
+      - name: Python Coverage
+        if: ${{ matrix.BUILD_TYPE == 'Release' }}
+        shell: pwsh
+        run: |
+          uv run pytest --cov -v ${{github.workspace}}/tests
+          uv run pytest --cov --cov-report=html:py_coverage_report ${{github.workspace}}/tests
 
       - name: Upload Build and Test Artifacts
         uses: actions/upload-artifact@v4
@@ -163,5 +174,6 @@ jobs:
           path: |
             ${{github.workspace}}/build
             ${{github.workspace}}/wheelhouse
+            ${{github.workspace}}/py_coverage_report
             !${{github.workspace}}/build/vcpkg_installed
           retention-days: 7
