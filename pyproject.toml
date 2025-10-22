@@ -1,9 +1,24 @@
 [project]
-name = "cryptodd-arrays" # Name on PyPI
+name = "cryptodd-arrays"
 requires-python = ">=3.11"
-dependencies = []
+# --- ADDED: numpy is a core dependency for the Python wrapper ---
+dependencies = [
+    "numpy>=1.24"
+]
 dynamic = ["version", "description"]
 
+# --- ADDED: Optional dependencies for testing ---
+# This allows installation with `pip install .[test]` or `uv pip install .[test]`
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov" # For checking test coverage
+]
+
+
+# ======================================================================
+# Build system configuration remains unchanged. It is correct as is.
+# ======================================================================
 [build-system]
 requires = ["py-build-cmake~=0.5.0"]
 build-backend = "py_build_cmake.build"
@@ -15,13 +30,9 @@ directory = "src/python"
 [tool.py-build-cmake.sdist]
 include = ["CMakeLists.txt", "src/", "CMakePresets.json", "CMakeUserPresets.json", "vcpkg.json"]
 
-
 [tool.py-build-cmake.cmake]
-minimum_version = "4.0"
+minimum_version = "4.0" # NOTE: This seems very low, modern CMake is 3.20+. Consider updating if you face issues.
 build_type = "RelWithDebInfo"
 build_args = ["--target", "cryptodd_arrays_shared", "cryptodd_arrays_py"]
-# note you should set env variable VCPKG_DEFAULT_TRIPLET=x64-windows-static before building
+
 options = { USE_MIMALLOC="on", CMAKE_MSVC_RUNTIME_LIBRARY="MultiThreadedDLL"}
-#options = { USE_MIMALLOC="on", VCPKG_TARGET_TRIPLET="x64-windows-static", CMAKE_MSVC_RUNTIME_LIBRARY="MultiThreadedDLL" }
-#options = {VCPKG_TARGET_TRIPLET="x64-windows-static", VCPKG_CRT_LINKAGE="dynamic"}
-#options = {VCPKG_LIBRARY_LINKAGE="static", VCPKG_TARGET_TRIPLET="x64-windows-static"}
