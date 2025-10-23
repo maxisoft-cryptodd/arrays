@@ -23,7 +23,7 @@ namespace {
         ChunkDataType type,
         DType dtype,
         std::span<const int64_t> shape,
-        uint64_t flags)
+        ChunkFlags flags)
     {
         if (!result) {
             return std::unexpected(CodecError::from_string(result.error(), ErrorCode::EncodingFailure));

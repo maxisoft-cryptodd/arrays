@@ -33,73 +33,75 @@ namespace cryptodd::ffi::StoreUtils {
 
 std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
     CddContext& context,
-    cryptodd::DataWriter& writer,
+    DataWriter& writer,
     const DataSpec& data_spec,
     const EncodingSpec& encoding_spec,
     std::span<const std::byte> chunk_input_data)
 {
-    cryptodd::ChunkDataType codec = encoding_spec.codec;
-    uint64_t flags = 0;
+    ChunkDataType codec = encoding_spec.codec;
+    ChunkFlags flags = ChunkFlags::NONE;
     for (const auto& flag_str : encoding_spec.flags) {
-        if (auto flag = magic_enum::enum_cast<cryptodd::ChunkFlags>(flag_str); flag.has_value()) {
-            flags |= static_cast<uint64_t>(flag.value());
+        if (auto flag = magic_enum::enum_cast<ChunkFlags>(flag_str); flag.has_value()) {
+            flags |= flag.value();
         } else {
             return std::unexpected(ExpectedError("Unknown flag: " + flag_str));
         }
     }
 
-    if ((flags & (cryptodd::ChunkFlags::FLAG_LITTLE_ENDIAN | cryptodd::ChunkFlags::FLAG_BIG_ENDIAN)) == 0) {
+    if (!hasFlag(flags, ChunkFlags::FLAG_LITTLE_ENDIAN) && !hasFlag(flags, ChunkFlags::FLAG_BIG_ENDIAN)) {
         if constexpr (std::endian::native == std::endian::little) {
-            flags |= cryptodd::ChunkFlags::FLAG_LITTLE_ENDIAN;
+            // ReSharper disable once CppDFAUnreachableCode
+            flags |= ChunkFlags::FLAG_LITTLE_ENDIAN;
         } else if constexpr (std::endian::native == std::endian::big) {
-            flags |= cryptodd::ChunkFlags::FLAG_BIG_ENDIAN;
+            // ReSharper disable once CppDFAUnreachableCode
+            flags |= ChunkFlags::FLAG_BIG_ENDIAN;
         }
     }
     auto direct_hash = is_perfect_reconstructible(codec);
     if (!direct_hash)
     {
-        flags |= cryptodd::ChunkFlags::RECONSTRUCTION_NOT_PERFECT;
+        flags |= ChunkFlags::RECONSTRUCTION_NOT_PERFECT;
     }
 
-    direct_hash = (flags & cryptodd::ChunkFlags::RECONSTRUCTION_NOT_PERFECT) == 0;
+    direct_hash = !hasFlag(flags, ChunkFlags::RECONSTRUCTION_NOT_PERFECT);
 
-    const int zstd_level = encoding_spec.zstd_level.value_or(cryptodd::ZstdCompressor::DEFAULT_COMPRESSION_LEVEL);
+    const int zstd_level = encoding_spec.zstd_level.value_or(ZstdCompressor::DEFAULT_COMPRESSION_LEVEL);
 
-    cryptodd::DataCompressor& compressor = context.get_compressor();
+    DataCompressor& compressor = context.get_compressor();
     
     std::expected<size_t, std::string> append_result;
     size_t compressed_size = 0;
     size_t original_size = chunk_input_data.size();
     blake3_hash256_t raw_data_hash = direct_hash ? calculate_blake3_hash256(chunk_input_data) : blake3_hash256_t{};
 
-    if (codec != cryptodd::ChunkDataType::RAW) {
+    if (codec != ChunkDataType::RAW) {
         std::remove_reference_t<decltype(compressor)>::ChunkResult chunk_result;
         switch (codec) {
-            case cryptodd::ChunkDataType::ZSTD_COMPRESSED:
+            case ChunkDataType::ZSTD_COMPRESSED:
                 chunk_result = compressor.compress_zstd(chunk_input_data, data_spec.shape, data_spec.dtype, zstd_level);
-                flags |= cryptodd::ChunkFlags::ZSTD;
+                flags |= ChunkFlags::ZSTD;
                 break;
-            case cryptodd::ChunkDataType::TEMPORAL_1D_SIMD_F16_XOR_SHUFFLE_AS_F32:
-            case cryptodd::ChunkDataType::TEMPORAL_1D_SIMD_F32_XOR_SHUFFLE:
+            case ChunkDataType::TEMPORAL_1D_SIMD_F16_XOR_SHUFFLE_AS_F32:
+            case ChunkDataType::TEMPORAL_1D_SIMD_F32_XOR_SHUFFLE:
                 {
-                    if (data_spec.dtype != cryptodd::DType::FLOAT32) return std::unexpected(ExpectedError("This codec requires FLOAT32 dtype."));
+                    if (data_spec.dtype != DType::FLOAT32) return std::unexpected(ExpectedError("This codec requires FLOAT32 dtype."));
                     auto data_span = std::span(reinterpret_cast<const float*>(chunk_input_data.data()), chunk_input_data.size() / sizeof(float));
                     chunk_result = compressor.compress_chunk(data_span, codec, 0.0f, zstd_level);
                     break;
                 }
-            case cryptodd::ChunkDataType::TEMPORAL_1D_SIMD_I64_XOR:
-            case cryptodd::ChunkDataType::TEMPORAL_1D_SIMD_I64_DELTA:
+            case ChunkDataType::TEMPORAL_1D_SIMD_I64_XOR:
+            case ChunkDataType::TEMPORAL_1D_SIMD_I64_DELTA:
                 {
-                    if (data_spec.dtype != cryptodd::DType::INT64) return std::unexpected(ExpectedError("This codec requires INT64 dtype."));
+                    if (data_spec.dtype != DType::INT64) return std::unexpected(ExpectedError("This codec requires INT64 dtype."));
                     auto data_span = std::span(reinterpret_cast<const int64_t*>(chunk_input_data.data()), chunk_input_data.size() / sizeof(int64_t));
                     chunk_result = compressor.compress_chunk(data_span, codec, 0, zstd_level);
                     break;
                 }
-            case cryptodd::ChunkDataType::OKX_OB_SIMD_F16_AS_F32: case cryptodd::ChunkDataType::BINANCE_OB_SIMD_F16_AS_F32: case cryptodd::ChunkDataType::GENERIC_OB_SIMD_F16_AS_F32:
-            case cryptodd::ChunkDataType::TEMPORAL_2D_SIMD_F16_AS_F32: case cryptodd::ChunkDataType::OKX_OB_SIMD_F32: case cryptodd::ChunkDataType::BINANCE_OB_SIMD_F32:
-            case cryptodd::ChunkDataType::GENERIC_OB_SIMD_F32: case cryptodd::ChunkDataType::TEMPORAL_2D_SIMD_F32:
+            case ChunkDataType::OKX_OB_SIMD_F16_AS_F32: case ChunkDataType::BINANCE_OB_SIMD_F16_AS_F32: case ChunkDataType::GENERIC_OB_SIMD_F16_AS_F32:
+            case ChunkDataType::TEMPORAL_2D_SIMD_F16_AS_F32: case ChunkDataType::OKX_OB_SIMD_F32: case ChunkDataType::BINANCE_OB_SIMD_F32:
+            case ChunkDataType::GENERIC_OB_SIMD_F32: case ChunkDataType::TEMPORAL_2D_SIMD_F32:
                 {
-                    if (data_spec.dtype != cryptodd::DType::FLOAT32) return std::unexpected(ExpectedError("This codec requires FLOAT32 dtype."));
+                    if (data_spec.dtype != DType::FLOAT32) return std::unexpected(ExpectedError("This codec requires FLOAT32 dtype."));
                     auto data_span = std::span(reinterpret_cast<const float*>(chunk_input_data.data()), chunk_input_data.size() / sizeof(float));
                     
                     size_t prev_state_elements = (data_spec.shape.size() > 1) ? data_spec.shape[1] : 0;
@@ -111,9 +113,9 @@ std::expected<ChunkWriteDetails, ExpectedError> compress_and_write_chunk(
                     chunk_result = compressor.compress_chunk(data_span, codec, data_spec.shape, prev_state, zstd_level);
                     break;
                 }
-            case cryptodd::ChunkDataType::TEMPORAL_2D_SIMD_I64:
+            case ChunkDataType::TEMPORAL_2D_SIMD_I64:
                 {
-                    if (data_spec.dtype != cryptodd::DType::INT64) return std::unexpected(ExpectedError("This codec requires INT64 dtype."));
+                    if (data_spec.dtype != DType::INT64) return std::unexpected(ExpectedError("This codec requires INT64 dtype."));
                     auto data_span = std::span(reinterpret_cast<const int64_t*>(chunk_input_data.data()), chunk_input_data.size() / sizeof(int64_t));
 
                     if (data_spec.shape.size() != 2) return std::unexpected(ExpectedError("TEMPORAL_2D_SIMD_I64 requires a 2D shape."));
