@@ -8,6 +8,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <utility> // Required for std::unreachable
 
 namespace cryptodd::memory
 {
@@ -74,7 +75,11 @@ namespace cryptodd::memory
 #ifndef NDEBUG
             if (!lock.owns_lock())
             {
+#ifdef __cpp_lib_unreachable
                 std::unreachable();
+#else
+                throw std::runtime_error("unreachable");
+#endif
             }
 #endif
             if (!pool_.empty())
