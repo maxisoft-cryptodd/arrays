@@ -23,6 +23,8 @@ public:
 
     void set_level(int level);
 
+    std::expected<size_t, std::string> get_decompress_size(std::span<const std::byte> compressed_data) { return this->do_get_decompress_size(compressed_data); }
+
 protected:
     // Implement the new protected virtual interface from ICompressor
     size_t do_get_compress_bound(std::span<const std::byte> uncompressed_data) override;
