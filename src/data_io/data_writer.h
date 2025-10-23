@@ -33,9 +33,6 @@ private:
 
     std::expected<void, std::string> write_new_chunk_offsets_block(uint64_t previous_block_offset);
 
-    std::expected<void, std::string> update_previous_chunk_offsets_block_pointer(uint64_t previous_block_offset,
-                                                                                  uint64_t new_block_offset);
-
 public:
     static constexpr size_t DEFAULT_CHUNK_OFFSETS_BLOCK_CAPACITY = 1024;
 
@@ -95,6 +92,12 @@ public:
     std::expected<size_t, std::string> append_chunk(ChunkDataType type, DType dtype, ChunkFlags flags,
                                                   std::span<const int64_t> shape, Chunk& source_chunk,
                                                   blake3_hash256_t raw_data_hash);
+
+    /**
+     * @brief Sets the ZSTD compression level for subsequent index block compression.
+     * @param level The compression level (1-22).
+     */
+    void set_compression_level(int level);
 
     /**
      * @brief Updates the user metadata in the file header.

@@ -1,4 +1,6 @@
 #include "test_helpers.h"
+#include "../src/data_io/data_reader.h"
+#include "../src/codecs/zstd_compressor.h"
 
 #include <random>
 #include <array>
@@ -30,4 +32,26 @@ std::filesystem::path generate_unique_test_filepath() {
     const uuids::uuid id = gen();
     const std::string filename = "cryptodd_test_" + uuids::to_string(id) + ".cdd";
     return std::filesystem::temp_directory_path() / filename;
+}
+
+::testing::AssertionResult UserMetadataMatches(const cryptodd::DataReader& reader, std::span<const std::byte> expected_meta) {
+    const auto& compressed_meta = reader.get_file_header().user_metadata();
+    if (compressed_meta.empty() && expected_meta.empty()) {
+        return ::testing::AssertionSuccess();
+    }
+    cryptodd::ZstdCompressor compressor;
+    auto decompressed_result = compressor.decompress(compressed_meta);
+    if (!decompressed_result) {
+        return ::testing::AssertionFailure() << "Failed to decompress user metadata: " << decompressed_result.error();
+    }
+    if (std::equal(decompressed_result->begin(), decompressed_result->end(), expected_meta.begin(), expected_meta.end())) {
+        return ::testing::AssertionSuccess();
+    }
+    return ::testing::AssertionFailure() << "User metadata does not match.";
+}
+
+cryptodd::blake3_hash256_t calculate_blake3_hash256(std::span<const std::byte> data) {
+    cryptodd::Blake3StreamHasher hasher;
+    hasher.update(data);
+    return hasher.finalize_256();
 }
