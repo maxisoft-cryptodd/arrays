@@ -11,21 +11,20 @@
 #include <memory> // For std::make_unique
 
 #include "../codecs/temporal_1d_simd_codec.h"
+#include "../memory/object_allocator.h"
+#include "../codecs/codec_cache.h"
 
 namespace cryptodd {
 
 namespace {
-    constexpr int CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION = -2;
 
-    struct CodecCache {
-        Temporal1dSimdCodecWorkspace workspace;
-        Temporal1dSimdCodec codec{std::make_unique<ZstdCompressor>(CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION)};
-    };
+    memory::ObjectAllocator<CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>> static_codec_cache_allocator{};
+}
 
-    auto& get_codec_cache() {
-        thread_local CodecCache cache;
-        return cache;
-    }
+// Implementation of the default allocator getter for DataWriter
+std::shared_ptr<cryptodd::memory::ObjectAllocator<cryptodd::CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> get_default_codec_allocator_writer() {
+    // Return a shared_ptr with a no-op deleter to the static allocator
+    return {&static_codec_cache_allocator, [](auto*) {}};
 }
 
 // --- Private Methods ---
@@ -50,7 +49,7 @@ std::expected<void, std::string> DataWriter::write_new_chunk_offsets_block(uint6
         hasher.update(std::span<const std::byte>(raw_offsets_payload));
         prev_block.set_hash(hasher.finalize_256());
 
-        auto& cache = get_codec_cache();
+        auto cache_ptr = codec_cache_allocator_->acquire();
         auto& offsets = prev_block.offsets(); // memory::vector<uint64_t>
 
         bool can_use_delta_encoding = true;
@@ -61,7 +60,7 @@ std::expected<void, std::string> DataWriter::write_new_chunk_offsets_block(uint6
         if (can_use_delta_encoding) {
             std::span<const int64_t> offsets_as_i64(reinterpret_cast<const int64_t*>(offsets.data()), offsets.size());
             
-            auto compressed_res = cache.codec.encode64_Delta(offsets_as_i64, 0, cache.workspace);
+            auto compressed_res = cache_ptr->codec.encode64_Delta(offsets_as_i64, 0, cache_ptr->workspace);
             if (!compressed_res) {
                 return std::unexpected("SIMD delta encoding failed: " + compressed_res.error());
             }
@@ -175,8 +174,9 @@ std::expected<std::unique_ptr<DataWriter>, std::string> DataWriter::create_in_me
 }
 
 DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend, size_t chunk_offsets_block_capacity,
-                       std::span<const std::byte> user_metadata)
-    : backend_(std::move(backend)), chunk_offsets_block_capacity_(chunk_offsets_block_capacity) {
+                       std::span<const std::byte> user_metadata,
+                       std::shared_ptr<cryptodd::memory::ObjectAllocator<cryptodd::CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> codec_allocator)
+    : backend_(std::move(backend)), chunk_offsets_block_capacity_(chunk_offsets_block_capacity), codec_cache_allocator_(std::move(codec_allocator)) {
     auto init = [this, user_metadata]() -> std::expected<void, std::string> {
         InternalMetadata internal_meta{};
         internal_meta.chunk_offsets_block_capacity = chunk_offsets_block_capacity_;
@@ -208,7 +208,9 @@ DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend, size_
     }
 }
 
-DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend) : backend_(std::move(backend)) {
+DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend,
+                       std::shared_ptr<cryptodd::memory::ObjectAllocator<cryptodd::CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> codec_allocator)
+    : backend_(std::move(backend)), codec_cache_allocator_(std::move(codec_allocator)) {
     auto init = [this]() -> std::expected<void, std::string> {
         if (auto res = file_header_.read(*backend_); !res) return res;
 

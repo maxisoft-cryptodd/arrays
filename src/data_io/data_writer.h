@@ -12,6 +12,16 @@
 #include "../codecs/zstd_compressor.h"
 #include "../file_format/cdd_file_format.h"
 #include "../storage/i_storage_backend.h"
+#include "../memory/object_allocator.h"
+
+// Forward declarations to avoid including codec headers in non-codec headers
+namespace cryptodd {
+    template <int DefaultCompressionLevel> struct CodecCache1d;
+    constexpr int CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION = -2;
+
+    // Forward declaration of the static allocator getter for DataWriter
+    std::shared_ptr<memory::ObjectAllocator<CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> get_default_codec_allocator_writer();
+}
 
 namespace cryptodd {
 
@@ -29,12 +39,15 @@ private:
     mutable std::optional<ZstdCompressor> zstd_compressor_;
     mutable std::once_flag zstd_init_flag_;
 
+    // Injected CodecCache allocator
+    std::shared_ptr<memory::ObjectAllocator<CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> codec_cache_allocator_;
+
     ZstdCompressor& get_zstd_compressor() const;
 
     std::expected<void, std::string> write_new_chunk_offsets_block(uint64_t previous_block_offset);
 
 public:
-    static constexpr size_t DEFAULT_CHUNK_OFFSETS_BLOCK_CAPACITY = 1024;
+    static constexpr size_t DEFAULT_CHUNK_OFFSETS_BLOCK_CAPACITY = 4096 * 4;
 
     /**
      * @brief Private construction key.
@@ -48,9 +61,11 @@ public:
 
     // Constructors are public but can only be called with the 'Create' passkey.
     explicit DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend, size_t chunk_offsets_block_capacity,
-                        std::span<const std::byte> user_metadata);
+                        std::span<const std::byte> user_metadata,
+                        std::shared_ptr<memory::ObjectAllocator<CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> codec_allocator = get_default_codec_allocator_writer());
 
-    explicit DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend);
+    explicit DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend,
+                        std::shared_ptr<memory::ObjectAllocator<CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> codec_allocator = get_default_codec_allocator_writer());
 
     /**
      * @brief Creates a new file for writing.
@@ -123,6 +138,8 @@ public:
      * @return The number of chunks.
      */
     [[nodiscard]] size_t num_chunks() const;
+
+    void set_codec_cache_allocator(decltype(codec_cache_allocator_) codec_allocator) { codec_cache_allocator_ = std::move(codec_allocator); }
 };
 
 } // namespace cryptodd
