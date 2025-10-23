@@ -194,6 +194,7 @@ add_executable(cryptodd_arrays_test
         test/codecs/float_conversion_simd_codec_test.cpp
         test/c_api/c_api_temporal_1d_simd_tests.cpp
         test/c_api/c_api_temporal_2d_simd_tests.cpp
+        test/memory/object_allocator_test.cpp
 )
 
 if(USE_MIMALLOC)

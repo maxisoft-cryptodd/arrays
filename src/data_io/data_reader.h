@@ -10,10 +10,20 @@
 #include <span>
 
 #include "../storage/i_storage_backend.h"
+#include "../memory/object_allocator.h"
 #include "../file_format/cdd_file_format.h"
 #include "../codecs/zstd_compressor.h"
 
+// Forward declarations to avoid including codec headers in non-codec headers
 namespace cryptodd {
+    template <int DefaultCompressionLevel> struct CodecCache1d;
+    using DefaultCodecCache1d = CodecCache1d<ZstdCompressor::DEFAULT_COMPRESSION_LEVEL>;
+}
+
+namespace cryptodd {
+
+// Forward declaration of the static allocator getter
+std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> get_default_codec_allocator();
 
 class DataReader {
     using IStorageBackend = storage::IStorageBackend;
@@ -26,6 +36,9 @@ class DataReader {
 
     uint64_t index_block_offset_{0};
     uint64_t index_block_size_{0};
+
+    // Injected CodecCache allocator
+    std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> codec_cache_allocator_;
 
     ZstdCompressor& get_zstd_compressor() const;
 
@@ -40,7 +53,8 @@ public:
         friend class DataReader;
     };
 
-    explicit DataReader(Create, std::unique_ptr<IStorageBackend>&& backend);
+    explicit DataReader(Create, std::unique_ptr<IStorageBackend>&& backend,
+                        std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> codec_allocator = get_default_codec_allocator());
     // Factory function for opening a file for reading. Returns an error on failure.
     static std::expected<std::unique_ptr<DataReader>, std::string> open(const std::filesystem::path& filepath);
 
@@ -64,6 +78,8 @@ public:
 
     // Retrieves a slice of chunks, returning a vector of raw data buffers. Returns an error on failure.
     std::expected<memory::vector<memory::vector<std::byte>>, std::string> get_chunk_slice(size_t start_index, size_t end_index);
+
+    void set_codec_cache_allocator(std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> codec_allocator) { codec_cache_allocator_ = std::move(codec_allocator); }
 };
 
 } // namespace cryptodd
