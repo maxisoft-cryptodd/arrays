@@ -236,7 +236,7 @@ namespace {
     };
 }
 
-std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, DType dtype, uint64_t flags,
+std::expected<size_t, std::string> DataWriter::append_chunk(ChunkDataType type, DType dtype, ChunkFlags flags,
                                                           std::span<const int64_t> shape,
                                                           Chunk& source_chunk,
                                                           blake3_hash256_t raw_data_hash) {

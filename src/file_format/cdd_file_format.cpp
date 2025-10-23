@@ -140,7 +140,7 @@ std::expected<void, std::string> Chunk::read(IStorageBackend& backend) {
     if (auto res = read_pod<uint16_t>(backend); res) type_ = static_cast<ChunkDataType>(*res); else return std::unexpected(res.error());
     if (auto res = read_pod<uint16_t>(backend); res) dtype_ = static_cast<DType>(*res); else return std::unexpected(res.error());
     if (auto res = read_pod<blake3_hash256_t>(backend); res) hash_ = *res; else return std::unexpected(res.error());
-    if (auto res = read_pod<uint64_t>(backend); res) flags_ = *res; else return std::unexpected(res.error());
+    if (auto res = read_pod<uint64_t>(backend); res) flags_ = static_cast<ChunkFlags>(*res); else return std::unexpected(res.error());
     if (auto res = read_vector_pod<int64_t>(backend); res) shape_ = std::move(*res); else return std::unexpected(res.error());
     if (auto res = read_blob(backend); res) data_ = std::move(*res); else return std::unexpected(res.error());
 

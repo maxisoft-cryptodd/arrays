@@ -55,10 +55,10 @@ std::expected<LoadChunksResponse, ExpectedError> LoadChunksHandler::execute_type
     }
 
     size_t total_decoded_size = 0;
-    std::vector<std::unique_ptr<cryptodd::Chunk>> chunks;
+    std::vector<std::unique_ptr<Chunk>> chunks;
     chunks.reserve(indices_to_load.size());
 
-    std::optional<cryptodd::DType> first_dtype;
+    std::optional<DType> first_dtype;
     std::optional<std::vector<int64_t>> first_shape_tail; // Shape excluding the first dimension
     bool compatible_shapes = true;
     int64_t sum_first_dim = 0;
@@ -109,9 +109,9 @@ std::expected<LoadChunksResponse, ExpectedError> LoadChunksHandler::execute_type
 
     size_t current_offset = 0;
     for (auto& chunk : chunks) {
-        const auto check_hash = request.check_checksums.value_or((chunk->flags() & cryptodd::ChunkFlags::SKIP_HASH_CHECK) == 0);
+        const auto check_hash = request.check_checksums.value_or(!chunk->has_flag(ChunkFlags::SKIP_HASH_CHECK));
         std::optional<blake3_hash256_t> hash = std::nullopt;
-        if (check_hash && chunk->flags() & cryptodd::ChunkFlags::RECONSTRUCTION_NOT_PERFECT)
+        if (check_hash && chunk->has_flag(ChunkFlags::RECONSTRUCTION_NOT_PERFECT))
         {
             hash = calculate_blake3_hash256(chunk->data());
         }

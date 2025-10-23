@@ -69,7 +69,7 @@ enum class DType : uint16_t {
     _RESERVED_DTYPE = 13,
 };
 
-enum ChunkFlags : uint64_t {
+enum class ChunkFlags : uint64_t {
     NONE = 0,
     LZ4 = 1 << 0,
     ZSTD = 1 << 1,
@@ -85,6 +85,33 @@ enum ChunkFlags : uint64_t {
 
     _RESERVED_CHUNK_FLAGS = 1ULL << 63
 };
+
+inline ChunkFlags operator|(ChunkFlags lhs, ChunkFlags rhs) {
+    using underlying = std::underlying_type_t<ChunkFlags>;
+    return static_cast<ChunkFlags>(
+        static_cast<underlying>(lhs) | static_cast<underlying>(rhs)
+    );
+}
+
+inline ChunkFlags operator&(ChunkFlags lhs, ChunkFlags rhs) {
+    using underlying = std::underlying_type_t<ChunkFlags>;
+    return static_cast<ChunkFlags>(
+        static_cast<underlying>(lhs) & static_cast<underlying>(rhs)
+    );
+}
+
+inline ChunkFlags& operator|=(ChunkFlags& lhs, ChunkFlags rhs) {
+    using underlying = std::underlying_type_t<ChunkFlags>;
+    lhs = static_cast<ChunkFlags>(
+        static_cast<underlying>(lhs) | static_cast<underlying>(rhs)
+    );
+    return lhs;
+}
+
+inline bool hasFlag(ChunkFlags value, ChunkFlags flag) {
+    using underlying = std::underlying_type_t<ChunkFlags>;
+    return (static_cast<underlying>(value) & static_cast<underlying>(flag)) != 0;
+}
 
 /**
  * @brief Gets the size of a DType in bytes.
@@ -198,7 +225,7 @@ public:
     [[nodiscard]] ChunkDataType type() const { return type_; }
     [[nodiscard]] DType dtype() const { return dtype_; }
     [[nodiscard]] const blake3_hash256_t& hash() const { return hash_; }
-    [[nodiscard]] uint64_t flags() const { return flags_; }
+    [[nodiscard]] ChunkFlags flags() const { return flags_; }
     [[nodiscard]] const memory::vector<int64_t>& shape() const { return shape_; }
     [[nodiscard]] const memory::vector<std::byte>& data() const { return data_; }
     /** @brief Gets a mutable reference to the chunk's data vector. */
@@ -211,7 +238,7 @@ public:
     void set_type(ChunkDataType type) { type_ = type; }
     void set_dtype(DType dtype) { dtype_ = dtype; }
     void set_hash(const blake3_hash256_t& hash) { hash_ = hash; }
-    void set_flags(uint64_t flags) { flags_ = flags; }
+    void set_flags(const ChunkFlags flags) { flags_ = flags; }
     void set_shape(memory::vector<int64_t> shape) { shape_ = std::move(shape); }
     /** @brief Sets the chunk's data, taking ownership of the provided vector. */
     void set_data(memory::vector<std::byte>&& data) { data_ = std::move(data); }
@@ -219,12 +246,14 @@ public:
     std::expected<void, std::string> write(IStorageBackend& backend) const;
     std::expected<void, std::string> read(IStorageBackend& backend);
 
+    bool has_flag(const ChunkFlags flag) const { return cryptodd::hasFlag(flags_, flag); }
+
 private:
     uint32_t size_{};
     ChunkDataType type_{};
     DType dtype_{};
     blake3_hash256_t hash_{};
-    uint64_t flags_{};
+    ChunkFlags flags_{};
     memory::vector<int64_t> shape_;
     memory::vector<std::byte> data_;
 };
