@@ -10,12 +10,28 @@
 #include <format>
 #include <memory> // For std::make_unique
 
+#include "../codecs/temporal_1d_simd_codec.h"
+
 namespace cryptodd {
+
+namespace {
+    constexpr int CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION = -2;
+
+    struct CodecCache {
+        Temporal1dSimdCodecWorkspace workspace;
+        Temporal1dSimdCodec codec{std::make_unique<ZstdCompressor>(CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION)};
+    };
+
+    auto& get_codec_cache() {
+        thread_local CodecCache cache;
+        return cache;
+    }
+}
 
 // --- Private Methods ---
 
 ZstdCompressor& DataWriter::get_zstd_compressor() const {
-    std::call_once(zstd_init_flag_, [this]() { zstd_compressor_.emplace(); });
+    std::call_once(zstd_init_flag_, [this]() { zstd_compressor_.emplace(CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION); });
     return *zstd_compressor_;
 }
 
@@ -34,35 +50,52 @@ std::expected<void, std::string> DataWriter::write_new_chunk_offsets_block(uint6
         hasher.update(std::span<const std::byte>(raw_offsets_payload));
         prev_block.set_hash(hasher.finalize_256());
 
-        auto& compressor = get_zstd_compressor();
-        auto compressed_res = compressor.compress(raw_offsets_payload);
-        if (!compressed_res) {
-            return std::unexpected("ZSTD compression failed: " + compressed_res.error());
+        auto& cache = get_codec_cache();
+        auto& offsets = prev_block.offsets(); // memory::vector<uint64_t>
+
+        bool can_use_delta_encoding = true;
+        if (!offsets.empty() && offsets.back() > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            can_use_delta_encoding = false; // Overflow but very unlikely to happen
         }
-        auto& compressed_payload = *compressed_res;
 
-        const size_t compressed_payload_disk_size = sizeof(uint32_t) + compressed_payload.size();
-        if (compressed_payload_disk_size < raw_offsets_payload.size()) {
-            prev_block.set_type(ChunkOffsetType::ZSTD_COMPRESSED);
+        if (can_use_delta_encoding) {
+            std::span<const int64_t> offsets_as_i64(reinterpret_cast<const int64_t*>(offsets.data()), offsets.size());
             
-            if (auto res = backend_->seek(previous_block_offset); !res) return res;
+            auto compressed_res = cache.codec.encode64_Delta(offsets_as_i64, 0, cache.workspace);
+            if (!compressed_res) {
+                return std::unexpected("SIMD delta encoding failed: " + compressed_res.error());
+            }
+            auto& compressed_payload = *compressed_res;
 
-            if (auto res = serialization::write_pod(*backend_, prev_block.size()); !res) return std::unexpected(res.error());
-            if (auto res = serialization::write_pod(*backend_, static_cast<uint16_t>(prev_block.type())); !res) return std::unexpected(res.error());
-            if (auto res = serialization::write_pod(*backend_, prev_block.hash()); !res) return std::unexpected(res.error());
-            if (auto res = serialization::write_pod(*backend_, prev_block.get_next_index_offset()); !res) return std::unexpected(res.error());
-            if (auto res = serialization::write_blob(*backend_, compressed_payload); !res) return std::unexpected(res.error());
+            const size_t compressed_payload_disk_size = sizeof(uint32_t) + compressed_payload.size();
+            if (compressed_payload_disk_size < raw_offsets_payload.size()) {
+                prev_block.set_type(ChunkOffsetType::ZSTD_COMPRESSED);
+                
+                if (auto res = backend_->seek(previous_block_offset); !res) return res;
 
-            const size_t header_plus_next_ptr_size = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash256_t) + sizeof(uint64_t);
-            const uint64_t end_of_compressed_data = previous_block_offset + header_plus_next_ptr_size + compressed_payload_disk_size;
-            const uint64_t end_of_block = previous_block_offset + prev_block.size();
+                if (auto res = serialization::write_pod(*backend_, prev_block.size()); !res) return std::unexpected(res.error());
+                if (auto res = serialization::write_pod(*backend_, static_cast<uint16_t>(prev_block.type())); !res) return std::unexpected(res.error());
+                if (auto res = serialization::write_pod(*backend_, prev_block.hash()); !res) return std::unexpected(res.error());
+                if (auto res = serialization::write_pod(*backend_, prev_block.get_next_index_offset()); !res) return std::unexpected(res.error());
+                if (auto res = serialization::write_blob(*backend_, compressed_payload); !res) return std::unexpected(res.error());
 
-            if (end_of_compressed_data < end_of_block) {
-                const size_t padding_size = end_of_block - end_of_compressed_data;
-                const memory::vector<std::byte> zeros(padding_size, std::byte{0});
-                if (auto res = backend_->write(zeros); !res) return std::unexpected("Failed to write zero padding: " + res.error());
+                const size_t header_plus_next_ptr_size = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash256_t) + sizeof(uint64_t);
+                const uint64_t end_of_compressed_data = previous_block_offset + header_plus_next_ptr_size + compressed_payload_disk_size;
+                const uint64_t end_of_block = previous_block_offset + prev_block.size();
+
+                if (end_of_compressed_data < end_of_block) {
+                    const size_t padding_size = end_of_block - end_of_compressed_data;
+                    const memory::vector<std::byte> zeros(padding_size, std::byte{0});
+                    if (auto res = backend_->write(zeros); !res) return std::unexpected("Failed to write zero padding: " + res.error());
+                }
+            } else {
+                // Fallback to RAW because compression was not beneficial
+                prev_block.set_type(ChunkOffsetType::RAW);
+                if (auto res = backend_->seek(previous_block_offset); !res) return res;
+                if (auto res = prev_block.write(*backend_); !res) return std::unexpected("Failed to write RAW block update: " + res.error());
             }
         } else {
+            // Fallback to RAW because offsets exceed int64_t max, cannot use delta encoding
             prev_block.set_type(ChunkOffsetType::RAW);
             if (auto res = backend_->seek(previous_block_offset); !res) return res;
             if (auto res = prev_block.write(*backend_); !res) return std::unexpected("Failed to write RAW block update: " + res.error());
@@ -82,6 +115,7 @@ std::expected<void, std::string> DataWriter::write_new_chunk_offsets_block(uint6
 
     const auto raw_payload_bytes = serialization::serialize_vector_pod_to_buffer(std::span(new_block.offsets()));
     Blake3StreamHasher initial_hasher;
+    // ReSharper disable once CppTemplateArgumentsCanBeDeduced
     initial_hasher.update(std::span<const std::byte>(raw_payload_bytes));
     new_block.set_hash(initial_hasher.finalize_256());
 

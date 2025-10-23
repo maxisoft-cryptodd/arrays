@@ -9,7 +9,20 @@
 #include <format>
 #include <span>
 
+#include "../codecs/temporal_1d_simd_codec.h"
+
 namespace cryptodd {
+
+namespace {
+    struct CodecCache {
+        Temporal1dSimdCodec codec{std::make_unique<ZstdCompressor>()};
+    };
+
+    auto& get_codec_cache() {
+        thread_local CodecCache cache;
+        return cache;
+    }
+}
 
 ZstdCompressor& DataReader::get_zstd_compressor() const {
     std::call_once(zstd_init_flag_, [this]() {
@@ -96,20 +109,23 @@ DataReader::DataReader(Create, std::unique_ptr<IStorageBackend>&& backend) : bac
                 auto compressed_blob_res = serialization::read_blob(*backend_);
                 if (!compressed_blob_res) return std::unexpected("Failed to read ZSTD blob: " + compressed_blob_res.error());
 
-                auto decompressed_res = get_zstd_compressor().decompress(*compressed_blob_res);
-                if (!decompressed_res) return std::unexpected("Failed to decompress ZSTD block: " + decompressed_res.error());
-                
-                auto& raw_payload_bytes = *decompressed_res;
+                const size_t header_and_ptr_size = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(blake3_hash256_t) + sizeof(uint64_t);
+                const size_t raw_payload_size = block_size_on_disk - header_and_ptr_size;
+                const size_t num_elements = (raw_payload_size - sizeof(uint32_t)) / sizeof(uint64_t);
 
+                auto& cache = get_codec_cache();
+                int64_t prev_element = 0;
+                auto decoded_res = cache.codec.decode64_Delta(*compressed_blob_res, num_elements, prev_element);
+                if (!decoded_res) return std::unexpected("SIMD delta decoding failed: " + decoded_res.error());
+
+                const auto raw_payload_bytes = serialization::serialize_vector_pod_to_buffer(std::span<const int64_t>(*decoded_res));
                 Blake3StreamHasher block_hasher;
                 block_hasher.update(std::span<const std::byte>(raw_payload_bytes));
                 if (block_hasher.finalize_256() != block_hash) {
                     return std::unexpected("ZSTD ChunkOffsetsBlock integrity check failed.");
                 }
-
-                auto payload_res = serialization::deserialize_vector_pod_from_buffer<uint64_t>(raw_payload_bytes);
-                if (!payload_res) return std::unexpected("Failed to parse decompressed ZSTD payload: " + payload_res.error());
-                offsets = std::move(*payload_res);
+                
+                offsets.assign(decoded_res->begin(), decoded_res->end());
             } else {
                 return std::unexpected("Unknown ChunkOffsetsBlock type.");
             }
