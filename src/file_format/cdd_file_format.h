@@ -21,46 +21,52 @@ constexpr size_t MAX_SHAPE_DIMENSIONS = 32;
 
 enum class ChunkOffsetType : uint16_t {
     RAW = 1,
-    LZ4_COMPRESSED = 2
+    ZSTD_COMPRESSED = 2,
+
+    _RESERVED = 3
 };
 
 enum class ChunkDataType : uint16_t {
-    RAW = 0,
-    ZSTD_COMPRESSED = 1,
+    RAW = 1,
+    ZSTD_COMPRESSED = 2,
 
     // Orderbook Codecs (F16 internal precision, returned as F32)
-    OKX_OB_SIMD_F16_AS_F32 = 2,
-    OKX_OB_SIMD_F32 = 3,
-    BINANCE_OB_SIMD_F16_AS_F32 = 4,
-    BINANCE_OB_SIMD_F32 = 5,
-    GENERIC_OB_SIMD_F16_AS_F32 = 6,
-    GENERIC_OB_SIMD_F32 = 7,
+    OKX_OB_SIMD_F16_AS_F32 = 3,
+    OKX_OB_SIMD_F32 = 4,
+    BINANCE_OB_SIMD_F16_AS_F32 = 5,
+    BINANCE_OB_SIMD_F32 = 6,
+    GENERIC_OB_SIMD_F16_AS_F32 = 7,
+    GENERIC_OB_SIMD_F32 = 8,
 
     // Temporal 1D Codecs
-    TEMPORAL_1D_SIMD_F16_XOR_SHUFFLE_AS_F32 = 8,
-    TEMPORAL_1D_SIMD_F32_XOR_SHUFFLE = 9,
-    TEMPORAL_1D_SIMD_I64_XOR = 10,
-    TEMPORAL_1D_SIMD_I64_DELTA = 11,
+    TEMPORAL_1D_SIMD_F16_XOR_SHUFFLE_AS_F32 = 9,
+    TEMPORAL_1D_SIMD_F32_XOR_SHUFFLE = 10,
+    TEMPORAL_1D_SIMD_I64_XOR = 11,
+    TEMPORAL_1D_SIMD_I64_DELTA = 12,
 
     // Temporal 2D Codecs
-    TEMPORAL_2D_SIMD_F16_AS_F32 = 12,
-    TEMPORAL_2D_SIMD_F32 = 13,
-    TEMPORAL_2D_SIMD_I64 = 14
+    TEMPORAL_2D_SIMD_F16_AS_F32 = 13,
+    TEMPORAL_2D_SIMD_F32 = 14,
+    TEMPORAL_2D_SIMD_I64 = 15,
+
+    _RESERVED = 16,
 };
 
 enum class DType : uint16_t {
-    FLOAT16 = 0,
-    FLOAT32 = 1,
-    FLOAT64 = 2,
-    INT8 = 3,
-    UINT8 = 4,
-    INT16 = 5,
-    UINT16 = 6,
-    INT32 = 7,
-    UINT32 = 8,
-    INT64 = 9,
-    UINT64 = 10,
-    BFLOAT16 = 11
+    FLOAT16 = 1,
+    FLOAT32 = 2,
+    FLOAT64 = 3,
+    INT8 = 4,
+    UINT8 = 5,
+    INT16 = 6,
+    UINT16 = 7,
+    INT32 = 8,
+    UINT32 = 9,
+    INT64 = 10,
+    UINT64 = 11,
+    BFLOAT16 = 12,
+
+    _RESERVED_DTYPE = 13,
 };
 
 enum ChunkFlags : uint64_t {
@@ -76,7 +82,8 @@ enum ChunkFlags : uint64_t {
     DOWN_CAST_128 = 1 << 8,
     RECONSTRUCTION_NOT_PERFECT = 1 << 9,
     SKIP_HASH_CHECK = 1 << 10,
-    RESERVED = 1ULL << 63
+
+    _RESERVED_CHUNK_FLAGS = 1ULL << 63
 };
 
 /**
