@@ -11,7 +11,7 @@ struct TestObject {
     int id;
 
     TestObject() : id(instance_count++) {}
-    ~TestObject() { instance_count--; }
+    ~TestObject() { --instance_count; }
 };
 
 std::atomic<int> TestObject::instance_count = 0;
@@ -117,19 +117,28 @@ TEST_F(ObjectAllocatorTest, MultiThreadedAcquireRelease) {
         ObjectAllocator<TestObject> allocator(capacity);
 
         std::vector<std::thread> threads;
-        for (size_t i = 0; i < num_threads; ++i) {
-            threads.emplace_back([&]() {
-                // Acquire and release in a tight loop to prevent deadlock
-                for (size_t j = 0; j < iterations_per_thread; ++j) {
-                    auto obj = allocator.acquire();
-                    ASSERT_NE(obj, nullptr);
-                }
-            });
+
+        for (size_t k = 0; k < 10; ++k)
+        {
+            for (size_t i = 0; i < num_threads; ++i) {
+                threads.emplace_back([&]() {
+                    // Acquire and release in a tight loop to prevent deadlock
+                    for (size_t j = 0; j < iterations_per_thread; ++j) {
+                        auto obj = allocator.acquire();
+                        ASSERT_NE(obj, nullptr);
+                        obj.reset();
+                    }
+                });
+            }
+
+            for (auto& t : threads) {
+                t.join();
+            }
+
+            threads.clear();
+            allocator.acquire().reset();
         }
 
-        for (auto& t : threads) {
-            t.join();
-        }
 
         // Pool should be fully populated by the end
         ASSERT_EQ(allocator.available(), capacity);

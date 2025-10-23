@@ -83,6 +83,7 @@ add_library(cryptodd_arrays_lib STATIC
         src/c_api/operations/store_utils.cpp
         src/c_api/operations/ping_handler.cpp
         src/codecs/float_conversion_simd_codec.cpp
+        src/data_io/chunk_offset_codec_allocator.cpp
 )
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES OUTPUT_NAME "cryptodd_arrays_lib")
