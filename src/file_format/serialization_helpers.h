@@ -2,7 +2,10 @@
 
 #include <vector>
 #include <span>
+#include <cstdint>
+#include <cstring>
 #include <expected>
+#include <vector>
 #include <string>
 #include <format>
 
