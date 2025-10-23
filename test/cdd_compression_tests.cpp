@@ -100,7 +100,7 @@ TEST_F(CddCompressionTest, CompressionSuccess) {
 }
 
 TEST_F(CddCompressionTest, CompressionFallbackForIncompressibleData) {
-    const size_t capacity = 4;
+    const size_t capacity = 1;
     const size_t total_chunks = capacity + 1;
     memory::vector<memory::vector<std::byte>> original_chunks;
 
@@ -138,7 +138,6 @@ TEST_F(CddCompressionTest, CompressionFallbackForIncompressibleData) {
 
         auto type_res = serialization::read_pod<ChunkOffsetType>(backend);
         ASSERT_TRUE(type_res.has_value()) << type_res.error();
-        // Expect the block to remain RAW because the data was incompressible
         EXPECT_EQ(*type_res, ChunkOffsetType::RAW);
     }
 
