@@ -172,12 +172,12 @@ private:
 class ChunkOffsetsBlock {
     using IStorageBackend = storage::IStorageBackend;
 public:
-    /** @brief The number of chunk offsets this block can hold (excluding the pointer to the next block). */
+    /** @brief The number of chunk offsets this block can hold. */
     [[nodiscard]] size_t capacity() const;
     /** @brief Gets the file offset of the next ChunkOffsetsBlock in the chain. */
-    [[nodiscard]] uint64_t get_next_index_offset() const;
+    [[nodiscard]] uint64_t get_next_index_offset() const { return next_block_offset_; }
     /** @brief Sets the file offset of the next ChunkOffsetsBlock in the chain. */
-    void set_next_index_offset(uint64_t offset);
+    void set_next_index_offset(uint64_t offset) { next_block_offset_ = offset; }
 
     // Other getters/setters
     [[nodiscard]] uint32_t size() const { return size_; }
@@ -189,8 +189,13 @@ public:
     [[nodiscard]] const blake3_hash256_t& hash() const { return hash_; }
     void set_hash(const blake3_hash256_t& hash) { hash_ = hash; }
 
-    [[nodiscard]] const memory::vector<uint64_t>& offsets_and_pointer() const { return offsets_and_pointer_; }
-    void set_offsets_and_pointer(memory::vector<uint64_t> offsets) { offsets_and_pointer_ = std::move(offsets); }
+    [[nodiscard]] const memory::vector<uint64_t>& offsets() const { return offsets_; }
+    void set_offsets(memory::vector<uint64_t> offsets) { offsets_ = std::move(offsets); }
+
+    /** @brief Calculates the exact size of the serialized RAW payload (count + data). */
+    [[nodiscard]] size_t get_raw_payload_size() const {
+        return sizeof(uint32_t) + (offsets_.size() * sizeof(uint64_t));
+    }
 
     std::expected<void, std::string> write(IStorageBackend& backend) const;
     std::expected<void, std::string> read(IStorageBackend& backend);
@@ -199,7 +204,8 @@ private:
     uint32_t size_{};
     ChunkOffsetType type_{};
     blake3_hash256_t hash_{};
-    memory::vector<uint64_t> offsets_and_pointer_;
+    uint64_t next_block_offset_ = 0;
+    memory::vector<uint64_t> offsets_;
 };
 
 /**

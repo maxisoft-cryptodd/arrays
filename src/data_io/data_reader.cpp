@@ -3,6 +3,7 @@
 #include "blake3_stream_hasher.h"
 #include "../storage/file_backend.h"
 #include "../storage/memory_backend.h"
+#include "../file_format/serialization_helpers.h"
 
 #include <filesystem> // For std::filesystem::exists
 #include <format>
@@ -11,9 +12,7 @@
 namespace cryptodd {
 
 ZstdCompressor& DataReader::get_zstd_compressor() const {
-    // Thread-safe lazy initialization
     std::call_once(zstd_init_flag_, [this]() {
-        // For decompression, we don't need a dictionary or a specific level.
         zstd_compressor_.emplace();
     });
     return *zstd_compressor_;
@@ -47,62 +46,85 @@ std::expected<std::unique_ptr<DataReader>, std::string> DataReader::open_in_memo
 }
 
 DataReader::DataReader(Create, std::unique_ptr<IStorageBackend>&& backend) : backend_(std::move(backend)) {
-    // The constructor must handle potential I/O errors from the backend.
-    // Since constructors can't return std::expected, we throw an exception
-    // which the static `open` factory functions will catch and convert to an error.
-    auto read_header = [this] -> std::expected<void, std::string> {
+    auto read_header = [this]() -> std::expected<void, std::string> {
         if (auto res = file_header_.read(*backend_); !res) {
             return std::unexpected(res.error());
         }
 
-        // Build master_chunk_offsets_ index
         auto tell_res = backend_->tell();
         if (!tell_res) return std::unexpected(tell_res.error());
 
-        // FIX: Capture the starting offset of the first index block. This is our index_block_offset_.
         index_block_offset_ = *tell_res;
         uint64_t total_index_size = 0;
-
         uint64_t current_block_offset = *tell_res;
+
         while (current_block_offset != 0) {
             if (auto seek_res = backend_->seek(current_block_offset); !seek_res) {
                 return std::unexpected(seek_res.error());
             }
-            ChunkOffsetsBlock block;
-            if (auto read_res = block.read(*backend_); !read_res) {
-                return std::unexpected(read_res.error());
-            }
+
+            auto size_res = serialization::read_pod<uint32_t>(*backend_);
+            if (!size_res) return std::unexpected("Failed to read block size: " + size_res.error());
+            const uint32_t block_size_on_disk = *size_res;
+
+            auto type_res = serialization::read_pod<ChunkOffsetType>(*backend_);
+            if (!type_res) return std::unexpected("Failed to read block type: " + type_res.error());
+            const auto block_type = *type_res;
+
+            auto hash_res = serialization::read_pod<blake3_hash256_t>(*backend_);
+            if (!hash_res) return std::unexpected("Failed to read block hash: " + hash_res.error());
+            const auto block_hash = *hash_res;
+
+            auto next_offset_res = serialization::read_pod<uint64_t>(*backend_);
+            if (!next_offset_res) return std::unexpected("Failed to read next block offset: " + next_offset_res.error());
             
-            // FIX: Add the size of the block we just read to the total.
-            total_index_size += block.size();
+            total_index_size += block_size_on_disk;
+            memory::vector<uint64_t> offsets;
 
-            // Verify the integrity of the index block itself
-            Blake3StreamHasher block_hasher;
-            block_hasher.update(std::span(block.offsets_and_pointer()));
-            if (block_hasher.finalize_256() != block.hash()) {
-                return std::unexpected("ChunkOffsetsBlock integrity check failed. The file index may be corrupt.");
+            if (block_type == ChunkOffsetType::RAW) {
+                auto payload_res = serialization::read_vector_pod<uint64_t>(*backend_);
+                if (!payload_res) return std::unexpected("Failed to read RAW block payload: " + payload_res.error());
+                offsets = std::move(*payload_res);
+
+                const auto raw_payload_bytes = serialization::serialize_vector_pod_to_buffer(std::span<const uint64_t>(offsets));
+                Blake3StreamHasher block_hasher;
+                block_hasher.update(std::span<const std::byte>(raw_payload_bytes));
+                if (block_hasher.finalize_256() != block_hash) {
+                    return std::unexpected("RAW ChunkOffsetsBlock integrity check failed.");
+                }
+            } else if (block_type == ChunkOffsetType::ZSTD_COMPRESSED) {
+                auto compressed_blob_res = serialization::read_blob(*backend_);
+                if (!compressed_blob_res) return std::unexpected("Failed to read ZSTD blob: " + compressed_blob_res.error());
+
+                auto decompressed_res = get_zstd_compressor().decompress(*compressed_blob_res);
+                if (!decompressed_res) return std::unexpected("Failed to decompress ZSTD block: " + decompressed_res.error());
+                
+                auto& raw_payload_bytes = *decompressed_res;
+
+                Blake3StreamHasher block_hasher;
+                block_hasher.update(std::span<const std::byte>(raw_payload_bytes));
+                if (block_hasher.finalize_256() != block_hash) {
+                    return std::unexpected("ZSTD ChunkOffsetsBlock integrity check failed.");
+                }
+
+                auto payload_res = serialization::deserialize_vector_pod_from_buffer<uint64_t>(raw_payload_bytes);
+                if (!payload_res) return std::unexpected("Failed to parse decompressed ZSTD payload: " + payload_res.error());
+                offsets = std::move(*payload_res);
+            } else {
+                return std::unexpected("Unknown ChunkOffsetsBlock type.");
             }
 
-            // Append valid chunk offsets from this block
-            for (size_t i = 0; i < block.capacity(); ++i) {
-                if (block.offsets_and_pointer()[i] != 0) { // Only add non-zero offsets
-                    master_chunk_offsets_.push_back(block.offsets_and_pointer()[i]);
+            for (const auto offset : offsets) {
+                if (offset != 0) {
+                    master_chunk_offsets_.push_back(offset);
                 } else {
-                    // If we hit a zero, it means this block is not fully filled yet,
-                    // and subsequent entries in this block (and future blocks) are also empty.
-                    // This is important for files that are still being appended to.
-                    current_block_offset = 0; // End the loop
-                    break;
+                    break; 
                 }
             }
-            if (current_block_offset != 0) { // If the loop wasn't broken by a zero offset
-                current_block_offset = block.get_next_index_offset();
-            }
+            current_block_offset = *next_offset_res;
         }
         
-        // FIX: Store the total calculated size of all index blocks.
         index_block_size_ = total_index_size;
-        
         return {};
     }();
 

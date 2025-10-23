@@ -13,31 +13,6 @@
 namespace fs = std::filesystem;
 using namespace cryptodd;
 
-// Custom predicate assertion for verifying user metadata.
-// This encapsulates the decompression logic and provides a clear failure message.
-::testing::AssertionResult UserMetadataMatches(const DataReader& reader, std::span<const std::byte> expected_meta) {
-    const auto& compressed_meta = reader.get_file_header().user_metadata();
-    if (compressed_meta.empty() && expected_meta.empty()) {
-        return ::testing::AssertionSuccess();
-    }
-
-    // Use a local compressor instance to decompress the metadata for verification.
-    ZstdCompressor compressor;
-    auto decompressed_result = compressor.decompress(compressed_meta);
-    if (!decompressed_result) {
-        return ::testing::AssertionFailure() << "Failed to decompress user metadata: " << decompressed_result.error();
-    }
-
-    if (std::equal(decompressed_result->begin(), decompressed_result->end(), expected_meta.begin(), expected_meta.end())) {
-        return ::testing::AssertionSuccess();
-    }
-
-    // This conversion to string is only for readable test output and assumes ASCII-compatible content.
-    return ::testing::AssertionFailure() << "User metadata does not match.\n"
-           << "      Expected: " << std::string(reinterpret_cast<const char*>(expected_meta.data()), expected_meta.size()) << "\n"
-           << "        Actual: " << std::string(reinterpret_cast<const char*>(decompressed_result->data()), decompressed_result->size());
-}
-
 // Test fixture for file-based tests
 class CddFileTest : public ::testing::Test {
 protected:

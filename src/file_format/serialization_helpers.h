@@ -115,4 +115,49 @@ inline std::expected<memory::vector<std::byte>, std::string> read_blob(storage::
     return blob;
 }
 
+// Serializes a vector of PODs into a byte buffer, prefixed with its count.
+template<typename T>
+inline memory::vector<std::byte> serialize_vector_pod_to_buffer(std::span<const T> vec) {
+    const auto count = static_cast<uint32_t>(vec.size());
+    const size_t data_size_bytes = vec.size_bytes();
+    const size_t total_size = sizeof(count) + data_size_bytes;
+
+    memory::vector<std::byte> buffer(total_size);
+    
+    // Write count
+    std::memcpy(buffer.data(), &count, sizeof(count));
+
+    // Write data
+    if (data_size_bytes > 0) {
+        std::memcpy(buffer.data() + sizeof(count), vec.data(), data_size_bytes);
+    }
+
+    return buffer;
+}
+
+// Deserializes a byte buffer (prefixed with a count) into a vector of PODs.
+template<typename T>
+inline std::expected<memory::vector<T>, std::string> deserialize_vector_pod_from_buffer(std::span<const std::byte> buffer) {
+    if (buffer.size() < sizeof(uint32_t)) {
+        return std::unexpected("Buffer is too small to contain a size prefix.");
+    }
+
+    uint32_t count;
+    std::memcpy(&count, buffer.data(), sizeof(count));
+
+    const size_t expected_data_size = static_cast<size_t>(count) * sizeof(T);
+    const size_t expected_total_size = sizeof(uint32_t) + expected_data_size;
+
+    if (buffer.size() != expected_total_size) {
+        return std::unexpected(std::format("Buffer size mismatch. Expected {} bytes, got {} bytes.", expected_total_size, buffer.size()));
+    }
+
+    memory::vector<T> vec(count);
+    if (count > 0) {
+        std::memcpy(vec.data(), buffer.data() + sizeof(uint32_t), expected_data_size);
+    }
+
+    return vec;
+}
+
 } // namespace cryptodd::serialization

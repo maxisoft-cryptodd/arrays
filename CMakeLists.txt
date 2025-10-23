@@ -181,6 +181,7 @@ endif()
 add_executable(cryptodd_arrays_test
         test/lib_simple_tests.cpp
         test/cdd_file_tests.cpp
+        test/cdd_compression_tests.cpp
         test/codecs/orderbook_simd_codec_test.cpp
         test/codecs/temporal_1d_simd_codec_test.cpp
         test/codecs/temporal_2d_simd_codec_test.cpp

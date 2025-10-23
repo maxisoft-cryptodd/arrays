@@ -54,10 +54,9 @@ std::expected<void, std::string> ChunkOffsetsBlock::write(IStorageBackend& backe
     if (auto res = write_pod(backend, size_); res) bytes_written += *res; else return std::unexpected(res.error());
     if (auto res = write_pod(backend, static_cast<uint16_t>(type_)); res) bytes_written += *res; else return std::unexpected(res.error());
     if (auto res = write_pod(backend, hash_); res) bytes_written += *res; else return std::unexpected(res.error());
-    if (auto res = write_vector_pod(backend, std::span(offsets_and_pointer_)); res) bytes_written += *res; else return std::unexpected(res.error());
+    if (auto res = write_pod(backend, next_block_offset_); res) bytes_written += *res; else return std::unexpected(res.error());
+    if (auto res = write_vector_pod(backend, std::span(offsets_)); res) bytes_written += *res; else return std::unexpected(res.error());
 
-    // The total bytes written must equal the size field of the block.
-    // This is a critical integrity check.
     if (bytes_written != size_) {
         return std::unexpected("ChunkOffsetsBlock size mismatch during write.");
     }
@@ -68,21 +67,11 @@ std::expected<void, std::string> ChunkOffsetsBlock::read(IStorageBackend& backen
     auto start_pos = backend.tell();
     if (!start_pos) return std::unexpected(start_pos.error());
 
-    auto size_res = read_pod<uint32_t>(backend);
-    if (!size_res) return std::unexpected(size_res.error());
-    size_ = *size_res;
-
-    auto type_res = read_pod<uint16_t>(backend);
-    if (!type_res) return std::unexpected(type_res.error());
-    type_ = static_cast<ChunkOffsetType>(*type_res);
-
-    auto hash_res = read_pod<blake3_hash256_t>(backend);
-    if (!hash_res) return std::unexpected(hash_res.error());
-    hash_ = *hash_res;
-
-    auto offsets_res = read_vector_pod<uint64_t>(backend);
-    if (!offsets_res) return std::unexpected(offsets_res.error());
-    offsets_and_pointer_ = std::move(*offsets_res);
+    if (auto res = read_pod<uint32_t>(backend); res) size_ = *res; else return std::unexpected(res.error());
+    if (auto res = read_pod<uint16_t>(backend); res) type_ = static_cast<ChunkOffsetType>(*res); else return std::unexpected(res.error());
+    if (auto res = read_pod<blake3_hash256_t>(backend); res) hash_ = *res; else return std::unexpected(res.error());
+    if (auto res = read_pod<uint64_t>(backend); res) next_block_offset_ = *res; else return std::unexpected(res.error());
+    if (auto res = read_vector_pod<uint64_t>(backend); res) offsets_ = std::move(*res); else return std::unexpected(res.error());
 
     auto end_pos = backend.tell();
     if (!end_pos) return std::unexpected(end_pos.error());
@@ -93,20 +82,7 @@ std::expected<void, std::string> ChunkOffsetsBlock::read(IStorageBackend& backen
 }
 
 size_t ChunkOffsetsBlock::capacity() const {
-    if (offsets_and_pointer_.empty()) return 0;
-    return offsets_and_pointer_.size() - 1;
-}
-
-uint64_t ChunkOffsetsBlock::get_next_index_offset() const {
-    if (offsets_and_pointer_.empty()) return 0;
-    return offsets_and_pointer_.back();
-}
-
-void ChunkOffsetsBlock::set_next_index_offset(uint64_t offset) {
-    if (offsets_and_pointer_.empty()) {
-        throw std::runtime_error("Cannot set next_index_offset on an empty offsets_and_pointer vector.");
-    }
-    offsets_and_pointer_.back() = offset;
+    return offsets_.size();
 }
 
 // --- Chunk ---
