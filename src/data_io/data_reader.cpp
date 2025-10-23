@@ -10,31 +10,19 @@
 #include <span>
 
 #include "../codecs/temporal_1d_simd_codec.h"
-#include "../memory/object_allocator.h"
-#include "../codecs/codec_cache.h"
+#include "../codecs/zstd_compressor.h"
+#include "chunk_offset_codec_allocator.h"
 
 namespace cryptodd {
 
-namespace {
-    // Static ObjectAllocator instance for CodecCache
-    memory::ObjectAllocator<DefaultCodecCache1d> static_codec_cache_allocator{};
-}
-
-// Implementation of the default allocator getter
-std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> get_default_codec_allocator()
-{
-    // Return a shared_ptr with a no-op deleter to the static allocator
-    return {&static_codec_cache_allocator, [](auto*) {}};
-}
-
 ZstdCompressor& DataReader::get_zstd_compressor() const
 {
-    std::call_once(zstd_init_flag_, [this]() { zstd_compressor_.emplace(); });
+    std::call_once(zstd_init_flag_, [this]() { zstd_compressor_ = std::make_unique<ZstdCompressor>(CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION_LEVEL); });
     return *zstd_compressor_;
 }
 
 DataReader::DataReader(Create, std::unique_ptr<IStorageBackend>&& backend,
-                       std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> codec_allocator) :
+                       std::shared_ptr<ChunkOffsetCodecAllocator> codec_allocator) :
     backend_(std::move(backend)), codec_cache_allocator_(std::move(codec_allocator))
 {
     auto read_header = [this]() -> std::expected<void, std::string>
@@ -262,5 +250,8 @@ std::expected<memory::vector<memory::vector<std::byte>>, std::string> DataReader
     }
     return slice_data;
 }
+
+
+    void DataReader::set_codec_cache_allocator(decltype(codec_cache_allocator_) codec_allocator) { codec_cache_allocator_ = std::move(codec_allocator); }
 
 } // namespace cryptodd

@@ -10,35 +10,27 @@
 #include <span>
 
 #include "../storage/i_storage_backend.h"
-#include "../memory/object_allocator.h"
 #include "../file_format/cdd_file_format.h"
 #include "../codecs/zstd_compressor.h"
 
 // Forward declarations to avoid including codec headers in non-codec headers
-namespace cryptodd {
-    template <int DefaultCompressionLevel> struct CodecCache1d;
-    using DefaultCodecCache1d = CodecCache1d<ZstdCompressor::DEFAULT_COMPRESSION_LEVEL>;
-}
+#include "chunk_offset_codec_allocator_fwd.h"
 
 namespace cryptodd {
 
-// Forward declaration of the static allocator getter
-std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> get_default_codec_allocator();
-
-class DataReader {
+    class DataReader {
     using IStorageBackend = storage::IStorageBackend;
 
     std::unique_ptr<storage::IStorageBackend> backend_;
     FileHeader file_header_;
     memory::vector<uint64_t> master_chunk_offsets_; // Consolidated index of all chunk offsets
-    mutable std::optional<ZstdCompressor> zstd_compressor_;
+    mutable std::unique_ptr<ZstdCompressor> zstd_compressor_;
     mutable std::once_flag zstd_init_flag_;
 
     uint64_t index_block_offset_{0};
     uint64_t index_block_size_{0};
 
-    // Injected CodecCache allocator
-    std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> codec_cache_allocator_;
+    std::shared_ptr<ChunkOffsetCodecAllocator> codec_cache_allocator_;
 
     ZstdCompressor& get_zstd_compressor() const;
 
@@ -54,7 +46,7 @@ public:
     };
 
     explicit DataReader(Create, std::unique_ptr<IStorageBackend>&& backend,
-                        std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> codec_allocator = get_default_codec_allocator());
+                        std::shared_ptr<ChunkOffsetCodecAllocator> codec_allocator = get_chunk_offset_codec_allocator());
     // Factory function for opening a file for reading. Returns an error on failure.
     static std::expected<std::unique_ptr<DataReader>, std::string> open(const std::filesystem::path& filepath);
 
@@ -79,7 +71,7 @@ public:
     // Retrieves a slice of chunks, returning a vector of raw data buffers. Returns an error on failure.
     std::expected<memory::vector<memory::vector<std::byte>>, std::string> get_chunk_slice(size_t start_index, size_t end_index);
 
-    void set_codec_cache_allocator(std::shared_ptr<memory::ObjectAllocator<DefaultCodecCache1d>> codec_allocator) { codec_cache_allocator_ = std::move(codec_allocator); }
+    void set_codec_cache_allocator(decltype(codec_cache_allocator_) codec_allocator);
 };
 
 } // namespace cryptodd

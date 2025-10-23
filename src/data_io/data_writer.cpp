@@ -10,27 +10,15 @@
 #include <format>
 #include <memory> // For std::make_unique
 
-#include "../codecs/temporal_1d_simd_codec.h"
-#include "../memory/object_allocator.h"
-#include "../codecs/codec_cache.h"
+#include "chunk_offset_codec_allocator.h"
 
-namespace cryptodd {
-
-namespace {
-
-    memory::ObjectAllocator<CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>> static_codec_cache_allocator{};
-}
-
-// Implementation of the default allocator getter for DataWriter
-std::shared_ptr<cryptodd::memory::ObjectAllocator<cryptodd::CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> get_default_codec_allocator_writer() {
-    // Return a shared_ptr with a no-op deleter to the static allocator
-    return {&static_codec_cache_allocator, [](auto*) {}};
-}
+namespace cryptodd
+{
 
 // --- Private Methods ---
 
 ZstdCompressor& DataWriter::get_zstd_compressor() const {
-    std::call_once(zstd_init_flag_, [this]() { zstd_compressor_.emplace(CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION); });
+    std::call_once(zstd_init_flag_, [this]() { zstd_compressor_ = std::make_unique<ZstdCompressor>(CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION_LEVEL); });
     return *zstd_compressor_;
 }
 
@@ -175,7 +163,7 @@ std::expected<std::unique_ptr<DataWriter>, std::string> DataWriter::create_in_me
 
 DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend, size_t chunk_offsets_block_capacity,
                        std::span<const std::byte> user_metadata,
-                       std::shared_ptr<cryptodd::memory::ObjectAllocator<cryptodd::CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> codec_allocator)
+                       std::shared_ptr<ChunkOffsetCodecAllocator> codec_allocator)
     : backend_(std::move(backend)), chunk_offsets_block_capacity_(chunk_offsets_block_capacity), codec_cache_allocator_(std::move(codec_allocator)) {
     auto init = [this, user_metadata]() -> std::expected<void, std::string> {
         InternalMetadata internal_meta{};
@@ -209,7 +197,7 @@ DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend, size_
 }
 
 DataWriter::DataWriter(Create, std::unique_ptr<IStorageBackend>&& backend,
-                       std::shared_ptr<cryptodd::memory::ObjectAllocator<cryptodd::CodecCache1d<CHUNK_OFFSETS_BLOCK_ZSTD_COMPRESSION>>> codec_allocator)
+                       std::shared_ptr<ChunkOffsetCodecAllocator> codec_allocator)
     : backend_(std::move(backend)), codec_cache_allocator_(std::move(codec_allocator)) {
     auto init = [this]() -> std::expected<void, std::string> {
         if (auto res = file_header_.read(*backend_); !res) return res;
@@ -470,5 +458,7 @@ std::expected<void, std::string> DataWriter::flush() {
     total_chunks += current_chunk_offset_block_index_;
     return total_chunks;
 }
+
+    void DataWriter::set_codec_cache_allocator(decltype(codec_cache_allocator_) codec_allocator) { codec_cache_allocator_ = std::move(codec_allocator); }
 
 } // namespace cryptodd
