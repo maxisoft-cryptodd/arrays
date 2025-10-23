@@ -20,6 +20,8 @@ public:
     std::expected<void, std::string> flush() override;
     std::expected<void, std::string> rewind() override;
     [[nodiscard]] std::expected<uint64_t, std::string> size() override;
+
+    std::span<std::byte> get_buffer() { return buffer_; }
 };
 
 } // namespace cryptodd::storage
