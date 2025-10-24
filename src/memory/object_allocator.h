@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <expected>
 #include <thread>
 #include <utility> // For std::move
 
@@ -44,7 +45,7 @@ namespace cryptodd::memory
             {}
         };
     }
-    
+
     template <typename T>
     class ObjectAllocator
     {
@@ -68,8 +69,15 @@ namespace cryptodd::memory
                 std::unique_lock pool_lock{pool_mutex_};
                 for (size_t i = 0; i < base_capacity_; ++i)
                 {
-                    typename Colony::iterator it = colony_.emplace();
-                    pool_.emplace_back(std::move(std::shared_ptr<T>(std::addressof(*it), [](void*) {})), it);
+                    typename Colony::iterator it;
+
+                    {
+                        std::unique_lock colony_lock{colony_mutex_};
+                        it = colony_.emplace();
+                        assert(it != colony_.end());
+                    }
+
+                    pool_.push_back(it);
                     ++pool_size_;
                 }
             }
@@ -83,48 +91,90 @@ namespace cryptodd::memory
         [[nodiscard]] std::shared_ptr<T> acquire()
         {
             std::unique_lock lock{mutex_};
-            cv_.wait(lock, [this] {
-                std::lock_guard pool_lock{pool_mutex_}; // this lock guard is mandatory
-                return !pool_.empty() || objects_in_use_ < burst_capacity_;
-            });
 
-            objects_in_use_.fetch_add(1, std::memory_order_relaxed);
+            while (objects_in_use_ >= burst_capacity_)
+            {
+                cv_.wait(lock);
+            }
 
-            if (pool_size_.load(std::memory_order_acquire) > 0) {
-                std::unique_lock pool_lock{pool_mutex_};
-                lock.unlock();
+            ++objects_in_use_;
+            assert(static_cast<std::make_signed_t<size_t>>(objects_in_use_.load(std::memory_order_relaxed)) > 0);
+            assert(objects_in_use_.load(std::memory_order_relaxed) <= burst_capacity_);
+
+            std::unique_lock pool_lock{pool_mutex_, std::try_to_lock};
+            lock.unlock();
+            while (pool_size_ > 0) {
+                if (!pool_lock.owns_lock() && !pool_lock.try_lock())
+                {
+                    continue;
+                }
+                assert(pool_lock.owns_lock());
                 if (!pool_.empty())
                 {
-                    pool_size_.fetch_sub(1, std::memory_order_release);
-                    auto [obj, it] = std::move(pool_.back());
+                    --pool_size_;
+                    auto it = pool_.back();
                     pool_.pop_back();
+                    pool_lock.unlock();
                     return create_handle(it);
                 }
             }
 
             // Pool was empty, create a new object in the colony
-            std::unique_lock colony_lock{colony_mutex_};
-            auto it = colony_.emplace();
+            typename Colony::iterator it;
+
+            {
+                std::unique_lock colony_lock{colony_mutex_};
+                it = colony_.emplace();
+                assert(it != colony_.end());
+            }
+
             return create_handle(it);
         }
 
         [[nodiscard]] size_t available() const noexcept
         {
-            return pool_size_.load(std::memory_order_consume);
+            return pool_size_;
         }
         [[nodiscard]] size_t in_use() const noexcept
         {
-            return objects_in_use_.load(std::memory_order_consume);
+            return objects_in_use_;
         }
         [[nodiscard]] size_t capacity() const noexcept
         {
             return base_capacity_;
         }
 
+        static constexpr std::string_view UNEXPECTED_NEGATIVE_POOL_SIZE = "Pool size is negative";
+        static constexpr std::string_view UNEXPECTED_POOL_SIZE_EXCEEDS_CAPACITY = "Pool size exceeds base capacity";
+        static constexpr std::string_view UNEXPECTED_NEGATIVE_OBJECTS_IN_USE = "Objects in use is negative";
+        static constexpr std::string_view UNEXPECTED_OBJECTS_IN_USE_EXCEEDS_BURST_CAPACITY = "Objects in use exceeds burst capacity";
+        static constexpr std::string_view UNEXPECTED_POOL_SIZE_MISMATCH = "Internal pool size mismatch";
+        static constexpr std::string_view UNEXPECTED_COLONY_SIZE_MISMATCH = "Colony size mismatch";
+
+        [[nodiscard]] std::expected<void, std::string> check_consistency() const noexcept
+        {
+            if (static_cast<std::make_signed_t<size_t>>(pool_size_) < 0) return std::unexpected(std::string(UNEXPECTED_NEGATIVE_POOL_SIZE));
+            if (pool_size_ > base_capacity_) return std::unexpected(std::string(UNEXPECTED_POOL_SIZE_EXCEEDS_CAPACITY));
+            if (static_cast<std::make_signed_t<size_t>>(objects_in_use_) < 0) return std::unexpected(std::string(UNEXPECTED_NEGATIVE_OBJECTS_IN_USE));
+            if (objects_in_use_ > burst_capacity_) return std::unexpected(std::string(UNEXPECTED_OBJECTS_IN_USE_EXCEEDS_BURST_CAPACITY));
+
+            {
+                std::unique_lock pool_lock {pool_mutex_};
+                if (pool_.size() != pool_size_) return std::unexpected(std::string(UNEXPECTED_POOL_SIZE_MISMATCH));
+            }
+
+            {
+                std::unique_lock colony_lock {colony_mutex_};
+                if (colony_.size() != pool_size_) return std::unexpected(std::string(UNEXPECTED_COLONY_SIZE_MISMATCH));
+            }
+
+            return {};
+        }
+
     private:
         // The move-only deleter functor is the key to correct ownership.
         struct Releaser {
-            ObjectAllocator* allocator;
+            std::atomic<ObjectAllocator*> allocator;
             Colony::iterator iterator;
 
             Releaser() = delete;
@@ -132,16 +182,32 @@ namespace cryptodd::memory
             {
             }
 
-            Releaser(Releaser&& other) noexcept : allocator(other.allocator), iterator(other.iterator) {
-                other.allocator = nullptr;
+            Releaser(Releaser&& other) noexcept : allocator(), iterator(other.iterator) {
+                auto alloc = other.allocator.load();
+                while (alloc != nullptr)
+                {
+                    if (other.allocator.compare_exchange_strong(alloc, nullptr))
+                    {
+                        break;
+                    }
+                }
+                allocator = alloc;
             }
+
             Releaser& operator=(Releaser& other) = delete;
             Releaser& operator=(const Releaser& other) = delete;
             Releaser& operator=(Releaser&& other) noexcept {
                 if (this != &other) {
-                    allocator = other.allocator;
+                    auto alloc = other.allocator.load();
+                    while (alloc != nullptr)
+                    {
+                        if (other.allocator.compare_exchange_strong(alloc, nullptr))
+                        {
+                            break;
+                        }
+                    }
+                    allocator = alloc;
                     iterator = other.iterator;
-                    other.allocator = nullptr;
                 }
                 return *this;
             }
@@ -150,48 +216,66 @@ namespace cryptodd::memory
             Releaser(const Releaser&) = delete;
 
             void operator()(void* ptr) {
-                if (allocator != nullptr) {
+                auto alloc = allocator.load();
+                if (alloc != nullptr && allocator.compare_exchange_strong(alloc, nullptr)) {
                     assert(ptr == std::addressof(*iterator));
-                    allocator->release(iterator);
-                    allocator = nullptr;
+                    alloc->release(iterator);
                 }
             }
         };
 
         std::shared_ptr<T> create_handle(Colony::iterator it) {
-            return std::shared_ptr<T>(&(*it), Releaser{this, it});
+            return std::shared_ptr<T>(std::addressof(*it), Releaser{this, it});
         }
 
         // Taking by value is correct for this pattern.
         void release(Colony::iterator it)
         {
-            std::lock_guard lock{mutex_};
+            --objects_in_use_;
 
+
+            bool should_destroy = true;
+
+            if (pool_size_.load(std::memory_order_relaxed) < base_capacity_)
             {
-                std::lock_guard pool_lock{pool_mutex_};
-                if (pool_.size() < base_capacity_) {
-                    pool_size_.fetch_add(1, std::memory_order_release);
-                    pool_.emplace_back(std::shared_ptr<T>(&(*it), [](void*){}), it);
-                    objects_in_use_.fetch_sub(1, std::memory_order_relaxed);
-                    cv_.notify_one();
-                    return;
+                std::unique_lock pool_lock{pool_mutex_, std::try_to_lock};
+                while (pool_size_ < base_capacity_ && should_destroy)
+                {
+                    if (!pool_lock.owns_lock() && !pool_lock.try_lock())
+                    {
+                        continue;
+                    }
+
+                    assert(pool_lock.owns_lock());
+
+                    if (pool_.size() >= base_capacity_)
+                    {
+                        break;
+                    }
+                    ++pool_size_;
+                    pool_.push_back(it);
+                    assert(pool_.size() == pool_size_);
+                    should_destroy = false;
                 }
+
             }
 
-            // Pool is full, erase from colony
+            if (should_destroy)
             {
                 std::lock_guard colony_lock{colony_mutex_};
                 colony_.erase(it);
             }
 
-            objects_in_use_.fetch_sub(1, std::memory_order_relaxed);
-            cv_.notify_one();
+            assert(static_cast<std::make_signed_t<size_t>>(objects_in_use_.load(std::memory_order_relaxed)) >= 0);
+            assert(objects_in_use_.load(std::memory_order_relaxed) <= burst_capacity_);
+
+            cv_.notify_all();
         }
 
 
         size_t base_capacity_;
         size_t burst_capacity_;
-        std::list<std::pair<std::shared_ptr<T>, typename Colony::iterator>> pool_;
+        std::list<typename Colony::iterator> pool_;
         mutable std::mutex mutex_;
         mutable std::mutex pool_mutex_;
         mutable std::mutex colony_mutex_;
