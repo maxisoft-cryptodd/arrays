@@ -110,6 +110,7 @@ TEST_F(ObjectAllocatorTest, AcquireBeyondBaseCapacityBurst) {
 }
 
 TEST_F(ObjectAllocatorTest, MultiThreadedAcquireRelease) {
+    for (size_t l = 0; l < 100; ++l) // Run a lot of time to detect possible rare race conditions
     {
         const size_t capacity = 2;
         const size_t num_threads = 4;
@@ -117,16 +118,26 @@ TEST_F(ObjectAllocatorTest, MultiThreadedAcquireRelease) {
         ObjectAllocator<TestObject> allocator(capacity);
 
         std::vector<std::thread> threads;
+        std::vector<std::weak_ptr<TestObject>> all_objects {};
+        std::mutex all_objects_mutex {};
 
-        for (size_t k = 0; k < 1; ++k)
+        for (size_t k = 0; k < (l % 8) + 1; ++k)
         {
             for (size_t i = 0; i < num_threads; ++i) {
-                threads.emplace_back([&]() {
+                threads.emplace_back([&allocator, &all_objects, &all_objects_mutex]() {
                     // Acquire and release in a tight loop to prevent deadlock
+                    std::vector<std::weak_ptr<TestObject>> objects;
+                    objects.reserve(iterations_per_thread);
                     for (size_t j = 0; j < iterations_per_thread; ++j) {
                         auto obj = allocator.acquire();
                         ASSERT_NE(obj, nullptr);
+                        objects.push_back(obj);
                         obj.reset();
+                    }
+
+                    {
+                        std::unique_lock lock{all_objects_mutex};
+                        std::ranges::copy(std::as_const(objects), std::back_inserter(all_objects));
                     }
                 });
             }
@@ -136,7 +147,6 @@ TEST_F(ObjectAllocatorTest, MultiThreadedAcquireRelease) {
             }
 
             threads.clear();
-            //allocator.acquire().reset();
         }
 
         // Wait until all objects are actually returned to the allocator.
@@ -153,10 +163,22 @@ TEST_F(ObjectAllocatorTest, MultiThreadedAcquireRelease) {
             std::this_thread::yield();
         }
 
-        // Pool should be fully populated by the end
-        ASSERT_EQ(allocator.available(), capacity);
+        ASSERT_FALSE(all_objects.empty());
+
+        for (auto& weak_ptr : all_objects)
+        {
+            ASSERT_TRUE(weak_ptr.expired()) << "A weak pointer is still valid";
+        }
+
+        ASSERT_TRUE(allocator.check_consistency().has_value()) << allocator.check_consistency().error();
+
+        // Note that due to extreme race condition, available may be lower than capacity.
+        // Eg the internal algorithm may discard (free) some value instead of reinserting into the pool.
+        // The weak ptr and TestObject::instance_count tests ensure that every object are cleaned up.
+        ASSERT_LE(allocator.available(), capacity);
         ASSERT_EQ(allocator.in_use(), 0);
-        ASSERT_EQ(TestObject::instance_count.load(), capacity);
+        ASSERT_LE(TestObject::instance_count.load(), capacity);
+        ASSERT_EQ(TestObject::instance_count.load(), allocator.available());
     }
     ASSERT_EQ(TestObject::instance_count.load(), 0);
 }
