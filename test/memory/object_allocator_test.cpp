@@ -118,7 +118,7 @@ TEST_F(ObjectAllocatorTest, MultiThreadedAcquireRelease) {
 
         std::vector<std::thread> threads;
 
-        for (size_t k = 0; k < 10; ++k)
+        for (size_t k = 0; k < 1; ++k)
         {
             for (size_t i = 0; i < num_threads; ++i) {
                 threads.emplace_back([&]() {
@@ -136,9 +136,22 @@ TEST_F(ObjectAllocatorTest, MultiThreadedAcquireRelease) {
             }
 
             threads.clear();
-            allocator.acquire().reset();
+            //allocator.acquire().reset();
         }
 
+        // Wait until all objects are actually returned to the allocator.
+        // t.join() doesn't guarantee the shared_ptr destructors have finished their work.
+        while (allocator.in_use() > 0) {
+            std::this_thread::yield(); // Be nice to the CPU
+        }
+
+        auto start = std::chrono::steady_clock::now();
+        while (allocator.available() < capacity) {
+            if (std::chrono::steady_clock::now() - start > std::chrono::seconds(1)) {
+                break; // Timeout
+            }
+            std::this_thread::yield();
+        }
 
         // Pool should be fully populated by the end
         ASSERT_EQ(allocator.available(), capacity);

@@ -37,7 +37,7 @@ private:
     std::expected<void, std::string> write_new_chunk_offsets_block(uint64_t previous_block_offset);
 
 public:
-    static constexpr size_t DEFAULT_CHUNK_OFFSETS_BLOCK_CAPACITY = 4096 * 4;
+    static constexpr size_t DEFAULT_CHUNK_OFFSETS_BLOCK_CAPACITY = 4096 * 8 / sizeof(uint64_t);
 
     /**
      * @brief Private construction key.
