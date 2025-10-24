@@ -730,3 +730,4 @@ cython_debug/
 /.py-build-cmake_cache/
 /wheelhouse/
 /tmp.txt
+bfg-1.*.jar
