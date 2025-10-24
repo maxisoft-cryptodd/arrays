@@ -16,33 +16,40 @@
 
 namespace cryptodd::memory
 {
+    // Forward-declare the main class. This is crucial.
+    template <typename T>
+    class ObjectAllocator;
+
+
     namespace details
     {
         template <typename T>
         concept PoolableObject = std::default_initializable<T> && std::movable<T>;
-    }
-    template <typename T>
-    class ObjectAllocator
-    {
-        struct Allocator: DefaultAllocator<T>
+
+        template <typename T>
+        struct ObjectPoolAllocator : DefaultAllocator<T>
         {
-            // Override the rebind from the base class to point to the correct type.
+            // This rebind now refers to the standalone struct, breaking the recursion.
             template <class U>
             struct rebind {
-                using other = typename ObjectAllocator<U>::Allocator;
+                using other = ObjectPoolAllocator<U>;
             };
 
             // Provide the necessary constructors for rebinding.
-            // The compiler won't generate them automatically once we add 'rebind'.
-            Allocator() = default;
+            ObjectPoolAllocator() = default;
 
             template <class U>
-            Allocator(const typename ObjectAllocator<U>::Allocator& other) noexcept
+            explicit ObjectPoolAllocator(const ObjectPoolAllocator<U>& other) noexcept
                 : DefaultAllocator<T>(other)
             {}
         };
+    }
+    
+    template <typename T>
+    class ObjectAllocator
+    {
 
-        using Colony = plf::colony<T, Allocator>;
+        using Colony = plf::colony<T, details::ObjectPoolAllocator<T>>;
     public:
         explicit ObjectAllocator(const size_t base_capacity = std::max(1u, std::thread::hardware_concurrency()),
                                  const size_t burst_multiplier = 2, const bool reserve = false) :
