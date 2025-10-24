@@ -1,6 +1,6 @@
 #pragma once
 
-#include "plf_colony.h"
+#include <plf_colony.h>
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -26,6 +26,20 @@ namespace cryptodd::memory
     {
         struct Allocator: DefaultAllocator<T>
         {
+            // Override the rebind from the base class to point to the correct type.
+            template <class U>
+            struct rebind {
+                using other = typename ObjectAllocator<U>::Allocator;
+            };
+
+            // Provide the necessary constructors for rebinding.
+            // The compiler won't generate them automatically once we add 'rebind'.
+            Allocator() = default;
+
+            template <class U>
+            Allocator(const typename ObjectAllocator<U>::Allocator& other) noexcept
+                : DefaultAllocator<T>(other)
+            {}
         };
 
         using Colony = plf::colony<T, Allocator>;

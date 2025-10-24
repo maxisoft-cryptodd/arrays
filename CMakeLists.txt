@@ -147,6 +147,9 @@ target_link_libraries(cryptodd_arrays_lib
 find_path(MAPBOX_ETERNAL_INCLUDE_DIRS "mapbox/eternal.hpp")
 target_include_directories(cryptodd_arrays_lib PRIVATE ${MAPBOX_ETERNAL_INCLUDE_DIRS})
 
+find_path(PLF_COLONY_INCLUDE_DIRS "plf_colony.h")
+target_include_directories(cryptodd_arrays_lib PRIVATE ${PLF_COLONY_INCLUDE_DIRS})
+
 target_compile_definitions(cryptodd_arrays_lib PRIVATE STATIC_LIBRARY_BUILD)
 
 set_target_properties(cryptodd_arrays_lib PROPERTIES POSITION_INDEPENDENT_CODE TRUE)

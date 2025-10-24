@@ -12,6 +12,7 @@
     "turbobase64",
     "magic-enum",
     "mapbox-eternal",
+    "plf-colony",
     {
       "name": "mimalloc",
       "features": [
