@@ -24,15 +24,9 @@ namespace cryptodd::memory
     template <typename T>
     class ObjectAllocator
     {
-#ifdef USE_MIMALLOC
-        struct Allocator: std::allocator_traits<::mi_stl_allocator<T>>::template rebind_alloc<T>
+        struct Allocator: DefaultAllocator<T>
         {
         };
-#else
-        struct Allocator: std::allocator_traits<std::allocator<T>>::template rebind_alloc<T>
-        {
-        };
-#endif
 
         using Colony = plf::colony<T, Allocator>;
     public:
@@ -143,12 +137,12 @@ namespace cryptodd::memory
             }
         };
 
-        std::shared_ptr<T> create_handle(typename Colony::iterator it) {
+        std::shared_ptr<T> create_handle(Colony::iterator it) {
             return std::shared_ptr<T>(&(*it), Releaser{this, it});
         }
 
         // Taking by value is correct for this pattern.
-        void release(typename Colony::iterator it)
+        void release(Colony::iterator it)
         {
             std::lock_guard lock{mutex_};
 
