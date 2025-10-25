@@ -5,7 +5,6 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
-#include <list>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -64,6 +63,24 @@ namespace cryptodd::memory
             {
                 throw std::invalid_argument("burst_multiplier must be at least 1");
             }
+
+            constexpr auto max_value = std::numeric_limits<decltype(burst_capacity_)>::max();
+
+            if (base_capacity == max_value)
+            {
+                burst_capacity_ = max_value;
+            }
+
+            if (burst_multiplier == max_value)
+            {
+                burst_capacity_ = max_value;
+            }
+
+            if (burst_capacity_ < base_capacity_)
+            {
+                throw std::runtime_error("capacity overflow");
+            }
+
             if (reserve)
             {
                 std::unique_lock pool_lock{pool_mutex_};
@@ -228,7 +245,6 @@ namespace cryptodd::memory
             return std::shared_ptr<T>(std::addressof(*it), Releaser{this, it});
         }
 
-        // Taking by value is correct for this pattern.
         void release(Colony::iterator it)
         {
             --objects_in_use_;
@@ -239,7 +255,7 @@ namespace cryptodd::memory
             if (pool_size_.load(std::memory_order_relaxed) < base_capacity_)
             {
                 std::unique_lock pool_lock{pool_mutex_, std::try_to_lock};
-                while (pool_size_ < base_capacity_ && should_destroy)
+                while (pool_size_ < base_capacity_)
                 {
                     if (!pool_lock.owns_lock() && !pool_lock.try_lock())
                     {
@@ -252,12 +268,12 @@ namespace cryptodd::memory
                     {
                         break;
                     }
-                    ++pool_size_;
                     pool_.push_back(it);
+                    ++pool_size_;
                     assert(pool_.size() == pool_size_);
                     should_destroy = false;
+                    break;
                 }
-
             }
 
             if (should_destroy)
@@ -275,7 +291,7 @@ namespace cryptodd::memory
 
         size_t base_capacity_;
         size_t burst_capacity_;
-        std::list<typename Colony::iterator> pool_;
+        std::deque<typename Colony::iterator> pool_;
         mutable std::mutex mutex_;
         mutable std::mutex pool_mutex_;
         mutable std::mutex colony_mutex_;
