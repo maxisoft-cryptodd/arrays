@@ -28,7 +28,7 @@ endif()
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
 endif ()
 
-project(cryptodd_arrays VERSION 0.0.1 LANGUAGES CXX)
+project(cryptodd_arrays VERSION 0.1.0 LANGUAGES CXX)
 
 find_program(CCACHE_PROGRAM ccache)
 if(LINUX AND CCACHE_PROGRAM)

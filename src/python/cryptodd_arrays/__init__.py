@@ -10,7 +10,7 @@ from .exceptions import CddError, CddOperationError, CddConfigError
 from .convenience import save_array, load_array
 from .stream import BufferedAutoChunker, GroupedWriter, GroupedReader
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
 # Define what gets imported with 'from cryptodd_arrays import *'
 __all__ = [
